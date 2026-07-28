@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 // Pages
 import Dashboard from '@/pages/dashboard';
 import Login from '@/pages/login';
+import Register from '@/pages/register';
 import Appointments from '@/pages/appointments';
 import Records from '@/pages/records';
 import Messages from '@/pages/messages';
@@ -31,6 +32,7 @@ export function AppRoutes() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
+      <Route path="/register" component={Register} />
       <Route path="/">
         {() => <ProtectedRoute component={Dashboard} />}
       </Route>

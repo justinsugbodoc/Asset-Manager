@@ -1,4 +1,12 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState } from 'react';
+
+// Canonical localStorage keys
+export const STORAGE_KEYS = {
+  AUTH_TOKEN: 'sugbodoc_auth_token',
+  CURRENT_USER: 'sugbodoc_current_user',
+  USERS: 'sugbodoc_users',
+  APPOINTMENTS: 'sugbodoc_appointments',
+} as const;
 
 type AuthContextType = {
   token: string | null;
@@ -9,15 +17,19 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('sugbodoc_token'));
+  const [token, setToken] = useState<string | null>(
+    localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN),
+  );
 
   const login = (newToken: string) => {
-    localStorage.setItem('sugbodoc_token', newToken);
+    localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newToken);
     setToken(newToken);
   };
 
+  // Only clears session — does NOT touch sugbodoc_users or sugbodoc_appointments
   const logout = () => {
-    localStorage.removeItem('sugbodoc_token');
+    localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     setToken(null);
   };
 

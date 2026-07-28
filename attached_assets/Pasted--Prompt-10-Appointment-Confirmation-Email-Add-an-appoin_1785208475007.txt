@@ -1,0 +1,202 @@
+## Prompt 10 — Appointment Confirmation Email
+
+Add an appointment confirmation email feature to the SugboDoc Patient Portal.
+
+The project currently uses `localStorage` for patient registration, login, profile information, and appointment booking. Continue using `localStorage` for this prototype.
+
+Use **Resend** to send the actual email through the existing Express API server.
+
+### Required Flow
+
+When a patient confirms an appointment:
+
+1. Retrieve the currently logged-in patient from:
+
+```text
+sugbodoc_current_user
+```
+
+2. Use the registered email address stored in the patient profile.
+
+3. Create a unique appointment reference number.
+
+4. Save the appointment in:
+
+```text
+sugbodoc_appointments
+```
+
+5. Send the appointment details to the Express server.
+
+6. The Express server must send a confirmation email using Resend.
+
+7. Show a loading state while the appointment and email are being processed.
+
+8. Disable the Confirm Booking button to prevent duplicate submissions.
+
+9. Show a success toast when both the appointment and email are successful.
+
+10. If the appointment is saved but the email fails, keep the appointment and show:
+
+```text
+Appointment booked successfully, but the confirmation email could not be sent.
+```
+
+### Server Endpoint
+
+Create:
+
+```text
+POST /api/notifications/appointment-email
+```
+
+The request body should contain:
+
+```ts
+{
+  appointmentReference: string;
+  patientName: string;
+  email: string;
+  doctorName: string;
+  specialty: string;
+  clinicName: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  status: string;
+}
+```
+
+Validate all required fields on the server.
+
+Validate the email address before attempting to send the message.
+
+### Email Connector
+
+Install and configure the Resend Node.js package.
+
+Create:
+
+```text
+artifacts/api-server/src/connectors/email-connector.ts
+```
+
+The connector must:
+
+* Initialize Resend using the server-side API key.
+* Send appointment confirmation emails.
+* Return whether the email was sent or failed.
+* Return the Resend email ID when available.
+* Handle errors without exposing API keys or sensitive data.
+
+### Email Template
+
+Create:
+
+```text
+artifacts/api-server/src/templates/appointment-email.ts
+```
+
+Use a clean, professional SugboDoc-branded HTML email.
+
+The email must include:
+
+* SugboDoc wordmark
+* Patient name
+* Appointment reference number
+* Doctor name
+* Specialty
+* Clinic name
+* Appointment date
+* Appointment time
+* Appointment status
+* Reminder to arrive 15 minutes early
+* Notice to contact the clinic when cancelling or rescheduling
+
+Suggested subject:
+
+```text
+SugboDoc Appointment Confirmation — {appointmentReference}
+```
+
+Suggested content:
+
+```text
+Hello Juan dela Cruz,
+
+Your appointment has been successfully booked.
+
+Appointment Reference: APT-10025
+Doctor: Dr. Maria Santos
+Specialty: Internal Medicine
+Clinic: Chong Hua Hospital
+Date: August 5, 2026
+Time: 10:00 AM
+Status: Confirmed
+
+Please arrive at least 15 minutes before your scheduled appointment.
+
+Thank you,
+SugboDoc
+Your lifelong digital health record
+```
+
+### Environment Variables
+
+Store these values in Replit Secrets:
+
+```env
+RESEND_API_KEY=
+EMAIL_FROM=
+```
+
+Do not place the Resend API key in:
+
+* React components
+* `localStorage`
+* GitHub source code
+* Client-side environment variables
+
+### Frontend Integration
+
+Update the booking confirmation function in:
+
+```text
+artifacts/sugbodoc/src/pages/appointments.tsx
+```
+
+After creating and saving the local appointment, call:
+
+```text
+POST /api/notifications/appointment-email
+```
+
+Use the email address from the authenticated patient's saved registration information.
+
+Do not ask the patient to enter an email address again during appointment booking.
+
+Store the email result with the local appointment:
+
+```ts
+{
+  emailStatus: "sent" | "failed" | "pending",
+  emailMessageId?: string
+}
+```
+
+The newly booked appointment must remain visible after refreshing the page.
+
+### Error Handling
+
+Handle these cases:
+
+* No logged-in patient
+* No registered email address
+* Invalid email format
+* Missing appointment details
+* Resend API error
+* Network error
+* Confirm button clicked more than once
+
+The appointment must not be deleted when the confirmation email fails.
+
+This implementation is for testing only. Keep the email service separate from the `localStorage` functions so the project can later be migrated to a real database without rewriting the email connector.

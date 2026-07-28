@@ -1,0 +1,114 @@
+## Prompt 10 — Appointment SMS and Email Notifications
+
+Connect appointment booking to the authenticated patient's registered email address and mobile number.
+
+When a patient confirms an appointment:
+
+1. Send the booking request to `POST /api/appointments`.
+2. Validate the selected doctor, specialty, clinic, date, and time.
+3. Retrieve the authenticated patient from the server session.
+4. Save the appointment in the PostgreSQL database.
+5. Send a confirmation email to the email address saved during registration.
+6. Send a confirmation SMS to the phone number saved during registration.
+7. Save the result of each notification in the `notification_logs` table.
+8. Return the saved appointment and notification results to the frontend.
+9. Show a success toast after the appointment is saved.
+
+Do not accept the notification email address or phone number directly from the booking form. Retrieve them from the authenticated patient's database record to prevent users from changing the recipient.
+
+### Email Integration
+
+Use Resend for transactional email.
+
+Create:
+
+```text
+artifacts/api-server/src/connectors/email-connector.ts
+artifacts/api-server/src/templates/appointment-email.ts
+```
+
+The confirmation email must contain:
+
+* Patient name
+* Doctor name
+* Specialty
+* Clinic name
+* Appointment date
+* Appointment time
+* Appointment status
+* Appointment reference number
+* Instructions to arrive 15 minutes early
+
+Use these environment variables:
+
+```env
+RESEND_API_KEY=
+EMAIL_FROM=
+```
+
+### SMS Integration
+
+Use Semaphore for Philippine SMS delivery. If Semaphore cannot be configured, use Twilio through a replaceable SMS connector.
+
+Create:
+
+```text
+artifacts/api-server/src/connectors/sms-connector.ts
+artifacts/api-server/src/templates/appointment-sms.ts
+```
+
+Example SMS:
+
+```text
+SugboDoc: Hi Juan, your appointment with Dr. Maria Santos at Chong Hua Hospital is confirmed for August 5, 2026 at 10:00 AM. Ref: APT-10025.
+```
+
+Use environment variables such as:
+
+```env
+SEMAPHORE_API_KEY=
+SEMAPHORE_SENDER_NAME=
+```
+
+or:
+
+```env
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+```
+
+### Notification Service
+
+Create:
+
+```text
+artifacts/api-server/src/services/notification-service.ts
+```
+
+The notification service must:
+
+* Send email and SMS independently.
+* Record `sent`, `failed`, or `skipped` for each channel.
+* Store provider message IDs when available.
+* Log errors without exposing secret credentials.
+* Allow the appointment to remain successfully booked when one notification fails.
+* Return a warning such as “Appointment booked, but SMS delivery failed.”
+* Prevent duplicate notifications when the booking request is submitted more than once.
+
+Update `confirmBooking()` in:
+
+```text
+artifacts/sugbodoc/src/pages/appointments.tsx
+```
+
+Replace the current React-state-only booking with an API request. Newly created appointments must remain available after refreshing the page.
+
+Also connect appointment cancellation and rescheduling to backend API routes:
+
+* `PATCH /api/appointments/:id`
+* `DELETE /api/appointments/:id`
+
+Send updated SMS and email notifications when an appointment is rescheduled or cancelled.
+
+Keep all provider credentials in Replit Secrets. Never place email, SMS, database, or authentication credentials in frontend code.
