@@ -1,0 +1,177 @@
+replit.md — paste this first into the file before anything else
+# SugboDoc Patient Portal — Project Context
+
+## Product
+SugboDoc is a cloud-native Healthcare Operating System connecting providers,
+diagnostics, insurers, employers, and patients in the Philippines.
+This app is the Patient Portal for patients to access their health records,
+appointments, bills, prescriptions, lab results, and messages with doctors.
+
+## Brand
+- Primary color: #4A4FC4 (indigo-blue)
+- Secondary: #3A3FA0 (dark indigo)
+- Accent: #E8E9FB (light indigo tint)
+- Text: #1A1A2E (near-black)
+- Success: #1D9E75, Warning: #F59E0B, Danger: #EF4444
+- Font: Inter
+- Logo: SugboDoc (use text wordmark styled in #4A4FC4 if no image available)
+
+## Tech Stack
+- React + Tailwind CSS
+- React Router v6 for navigation
+- Recharts for charts
+- lucide-react for icons
+- Mock data only (no backend)
+
+## Responsive Breakpoints
+- Mobile < 768px: single column, bottom tab bar navigation
+- Tablet 768–1023px: 2-column grid, collapsible sidebar
+- Desktop 1024px+: fixed left sidebar 240px, 3-column content grid
+- All tap targets minimum 44px height
+- No hardcoded pixel widths on content areas — use % or Tailwind fluid classes
+
+## Philippine Context
+- Currency: Philippine Peso (₱)
+- Clinic names: Cebu Doctors' University Hospital, Perpetual Succour Hospital,
+  Chong Hua Hospital, Vicente Sotto Memorial Medical Center
+- Sample doctor names: Dr. Maria Santos, Dr. Jose Reyes, Dr. Ana Villanueva
+- Specialties: Internal Medicine, Cardiology, Pediatrics, OB-GYN, Dermatology
+- Sample patient: Juan dela Cruz, 34M, Blood Type O+
+
+
+Prompt 1 — Project shell and navigation
+Using the context in replit.md, scaffold the SugboDoc Patient Portal.
+
+Set up:
+- React + Tailwind CSS project
+- React Router with routes for: /, /appointments, /records, /messages,
+  /billing, /profile
+- Responsive layout shell:
+  Mobile: bottom tab bar with 5 icons — Home, Appointments, Records,
+  Messages, Profile
+  Tablet: collapsible left sidebar with icon + label
+  Desktop: fixed left sidebar always visible, SugboDoc logo at top
+- Active route highlighted in primary brand color #4A4FC4
+- Clean white background, Inter font loaded from Google Fonts
+
+
+Prompt 2 — Login screen
+Build the Login screen (route: /login) for SugboDoc Patient Portal.
+
+Include:
+- SugboDoc logo/wordmark centered at top in #4A4FC4
+- Tagline: "Your lifelong digital health record"
+- Email and password input fields
+- Primary login button in #4A4FC4
+- "Forgot password?" link below
+- On login, store a mock auth token in localStorage and redirect to /
+- Centered card layout on all screen sizes
+- Show a loading spinner on the button while "authenticating"
+
+
+Prompt 3 — Dashboard
+Build the Dashboard (route: /) for SugboDoc Patient Portal.
+
+Include:
+- Welcome header: "Good morning, Juan" with patient avatar initials circle
+- 4 metric cards in a responsive grid (2-col mobile, 4-col desktop):
+  Next Appointment, Unread Messages, Pending Bills, Active Prescriptions
+- Upcoming appointments list (3 items): date, doctor name, specialty,
+  status badge (Confirmed=green, Pending=amber, Cancelled=red)
+- 4 quick action buttons: Book Appointment, Message Doctor,
+  View Records, Pay Bill — each with an icon
+- Recent activity feed (last 5 actions with timestamps)
+- Use mock Philippine patient data from replit.md context
+
+
+Prompt 4 — Appointments
+Build the Appointments page (route: /appointments).
+
+Include:
+- Filter tabs: Upcoming / Past
+- Appointment cards: date, time, doctor name, specialty, clinic name,
+  status badge (color-coded)
+- Book New Appointment button at top right
+- Booking flow (modal or new route):
+  Step 1: Select specialty
+  Step 2: Select doctor
+  Step 3: Pick date and time slot
+  Step 4: Confirm — show success toast
+- Appointment detail view: full info, Cancel and Reschedule buttons
+- Cancel shows a confirmation modal before proceeding
+
+
+Prompt 5 — Medical records
+Build the Medical Records page (route: /records).
+
+Include:
+- Horizontal tabs: Encounters, Vitals, Prescriptions, Lab Results,
+  SOAP Notes, Diagnoses
+- Encounters: list with date, doctor, chief complaint, short summary
+- Vitals: data table (BP, Heart Rate, Temp, Weight, Date) +
+  a Recharts line chart showing BP trend over last 6 months
+- Prescriptions: medication name, dosage, instructions, refill status badge
+- Lab Results: test name, result value, reference range, date,
+  Normal (green) or Abnormal (red) badge
+- SOAP Notes: date, doctor, formatted SOAP content
+- Diagnoses: ICD code, description, date, status (Active/Resolved)
+- Use realistic mock data for a 34-year-old male Filipino patient
+
+
+Prompt 6 — Messaging
+Build the Messaging page (route: /messages).
+
+Include:
+- Inbox list: doctor avatar, name, last message preview, timestamp,
+  unread count badge
+- Chat thread: bubble-style messages (patient right, doctor left),
+  message input field pinned to bottom, send button
+- Mobile: full-screen chat when a thread is open, back button to inbox
+- Tablet/Desktop: split-pane — inbox list left, chat thread right
+- Mock conversation with Dr. Maria Santos about a follow-up consultation
+- Show typing indicator animation
+
+
+Prompt 7 — Billing
+Build the Billing page (route: /billing).
+
+Include:
+- Outstanding Bills section: description, date, amount in ₱, Pay button
+- Bulk Pay All button at the top if multiple bills exist
+- Payment form (modal): card number, expiry, CVV fields +
+  radio buttons for GCash, Maya, or Credit/Debit Card
+- On payment confirmation, show a success toast and move bill to history
+- Payment History section: past transactions with receipt download button
+  (mock PDF, just a toast saying "Receipt downloaded")
+- All amounts in Philippine Peso (₱)
+
+
+Prompt 8 — Profile and settings
+Build the Profile page (route: /profile).
+
+Include:
+- Patient info card: full name, birthday, blood type, allergies list,
+  emergency contact name and number
+- Edit Profile button that opens an editable form inline
+- Notification preferences section with toggles:
+  Appointment Reminders, Lab Result Alerts, Doctor Messages,
+  Billing Notifications
+- App settings: Language (English / Filipino), Dark Mode toggle
+- Logout button at the bottom — clears localStorage and redirects to /login
+
+
+Prompt 9 — Polish pass
+Do a full polish pass on the SugboDoc Patient Portal:
+
+1. Verify all screens are fully responsive at 360px, 768px, and 1280px
+2. Add loading skeleton screens to all data-fetching states
+3. Add empty state messages with an icon where lists may be empty
+   (e.g. "No upcoming appointments", "No messages yet")
+4. Ensure all interactive elements (buttons, tabs, inputs) have
+   hover and focus states
+5. Add a top header bar on mobile showing the current page title
+   and a notification bell icon
+6. Confirm brand color #4A4FC4 is consistently applied across all
+   active states, buttons, and badges
+7. Fix any broken layouts or overflowing content on small screens
+

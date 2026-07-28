@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "SugboDoc Patient Portal"
+version = "1.0.0"
+id = "artifacts/sugbodoc"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21006
+
+[services.development]
+run = "pnpm --filter @workspace/sugbodoc run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/sugbodoc", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/sugbodoc/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21006"
+BASE_PATH = "/"
