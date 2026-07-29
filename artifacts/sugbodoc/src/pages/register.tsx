@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useLocation, Link } from 'wouter';
 import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
+import Logo from '@/components/brand/logo';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
-const BLOOD_TYPES = ['A+', 'A−', 'B+', 'B−', 'O+', 'O−', 'AB+', 'AB−', 'Unknown'];
 
 type StoredUser = {
   name: string;
@@ -36,7 +36,6 @@ export default function Register() {
     phone: '',
     birthday: '',
     gender: '',
-    bloodType: '',
     password: '',
     confirmPassword: '',
   });
@@ -60,7 +59,6 @@ export default function Register() {
     if (!form.phone.trim()) return 'Phone number is required.';
     if (!form.birthday) return 'Birthday is required.';
     if (!form.gender) return 'Please select a gender.';
-    if (!form.bloodType) return 'Please select a blood type.';
     if (form.password.length < 8) return 'Password must be at least 8 characters.';
     if (form.password !== form.confirmPassword) return 'Passwords do not match.';
     return '';
@@ -93,7 +91,7 @@ export default function Register() {
         phone: form.phone.trim(),
         birthday: form.birthday,
         gender: form.gender,
-        bloodType: form.bloodType,
+        bloodType: '',
       };
 
       // Save full user list (includes password for login lookup)
@@ -140,7 +138,7 @@ export default function Register() {
 
       <div className="w-full max-w-[440px] bg-card rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-border p-8 relative z-10 my-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary tracking-tight">SugboDoc</h1>
+          <Logo className="justify-center" />
           <p className="text-sm text-muted-foreground mt-2">Create your patient account</p>
         </div>
 
@@ -209,19 +207,6 @@ export default function Register() {
               </select>
             </Field>
           </div>
-
-          {/* Blood Type */}
-          <Field id="bloodType" label="Blood Type">
-            <select
-              id="bloodType"
-              value={form.bloodType}
-              onChange={set('bloodType')}
-              className={`${inputCls} text-sm`}
-            >
-              <option value="">Select blood type…</option>
-              {BLOOD_TYPES.map((bt) => <option key={bt} value={bt}>{bt}</option>)}
-            </select>
-          </Field>
 
           {/* Password */}
           <Field id="password" label="Password">

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLocation, Link } from 'wouter';
 import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
+import Logo from '@/components/brand/logo';
 
 type StoredUser = {
   name: string;
@@ -61,7 +62,7 @@ export default function Login() {
 
       <div className="w-full max-w-[400px] bg-card rounded-2xl shadow-xl shadow-slate-200/50 dark:shadow-none border border-border p-8 relative z-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-primary tracking-tight">SugboDoc</h1>
+          <Logo className="justify-center" />
           <p className="text-sm text-muted-foreground mt-2">Your lifelong digital health record</p>
         </div>
 

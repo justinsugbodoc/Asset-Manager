@@ -1,7 +1,7 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import { Home, Calendar, FileText, MessageSquare, CreditCard, User, LogOut, Bell } from 'lucide-react';
-import { currentPatient } from '@/data/mock';
+import Logo from '@/components/brand/logo';
 
 type ShellProps = {
   children: ReactNode;
@@ -26,7 +26,7 @@ export default function AppShell({ children, title }: ShellProps) {
       {/* Desktop Sidebar (lg and up) */}
       <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card">
         <div className="h-16 flex items-center px-6 border-b border-border">
-          <span className="text-xl font-bold text-primary">SugboDoc</span>
+          <Logo />
         </div>
         
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">

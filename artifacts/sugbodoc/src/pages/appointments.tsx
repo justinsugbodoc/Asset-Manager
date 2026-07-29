@@ -136,41 +136,40 @@ export default function Appointments() {
 
     setIsConfirming(true);
 
-    // 2. Attempt to send confirmation email via API
+    // 2. Attempt email through the server.
     let emailSent = false;
     let emailMessageId: string | undefined;
-
-    if (currentUser?.email) {
-      try {
-        const BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
-        const res = await fetch(`${BASE}/api/notifications/appointment-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            appointmentReference: reference,
-            patientName: currentUser.name,
-            email: currentUser.email,
-            doctorName: selectedDoctor.name,
-            specialty: selectedDoctor.specialty,
-            clinicName: selectedDoctor.clinic,
-            appointmentDate: selectedDate,
-            appointmentTime: selectedTime,
-            status: 'Pending',
-          }),
-        });
-
-        if (res.ok) {
-          const json = (await res.json()) as { sent: boolean; messageId?: string };
-          emailSent = json.sent;
-          emailMessageId = json.messageId;
-        }
-      } catch {
-        // Network failure — appointment is already saved, email just failed
-        emailSent = false;
+    let emailError = '';
+    try {
+      const BASE = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+      const res = await fetch(`${BASE}/api/notifications/appointment-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentReference: reference,
+          patientName: currentUser?.name ?? 'Patient',
+          email: currentUser?.email,
+          doctorName: selectedDoctor.name,
+          specialty: selectedDoctor.specialty,
+          clinicName: selectedDoctor.clinic,
+          appointmentDate: selectedDate,
+          appointmentTime: selectedTime,
+          status: 'Pending',
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json() as { sent: boolean; messageId?: string; error?: string };
+        emailSent = json.sent;
+        emailMessageId = json.messageId;
+        emailError = json.error ?? '';
+      } else {
+        emailError = 'Notification service unavailable';
       }
+    } catch {
+      emailError = 'Notification service unavailable';
     }
 
-    // 3. Update appointment record with email outcome
+    // 3. Save the email notification result.
     const finalStatus: EmailStatus = emailSent ? 'sent' : 'failed';
     const finalAppointments = updated.map(apt =>
       apt.id === newApt.id
@@ -183,24 +182,12 @@ export default function Appointments() {
     setIsConfirming(false);
     resetBooking();
 
-    // 4. Show appropriate toast
-    if (emailSent) {
-      toast({
-        title: 'Appointment Booked',
-        description: `${reference} — A confirmation email has been sent to ${currentUser?.email}.`,
-      });
-    } else if (currentUser?.email) {
-      toast({
-        title: 'Appointment booked successfully, but the confirmation email could not be sent.',
-        description: `Reference: ${reference}`,
-        variant: 'destructive',
-      });
-    } else {
-      toast({
-        title: 'Appointment Requested',
-        description: `Reference: ${reference}. Log in with your email to receive confirmations.`,
-      });
-    }
+    // 4. Show the email result.
+    toast({
+      title: 'Appointment Booked',
+      description: `Reference: ${reference}. Email: ${emailSent ? 'sent' : `not sent${emailError ? ` (${emailError})` : ''}`}.`,
+      variant: emailSent ? undefined : 'destructive',
+    });
   };
 
   const appointmentsList: Appointment[] =
