@@ -203,7 +203,8 @@ export default function Appointments() {
     }
   };
 
-  const appointmentsList = activeTab === 'upcoming' ? localAppointments : pastAppointments;
+  const appointmentsList: Appointment[] =
+    activeTab === 'upcoming' ? localAppointments : (pastAppointments as Appointment[]);
 
   return (
     <AppShell title="Appointments">

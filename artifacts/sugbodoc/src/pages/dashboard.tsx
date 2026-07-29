@@ -1,11 +1,29 @@
 import { useState, useEffect } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { currentPatient, upcomingAppointments, inbox, bills, activities } from '@/data/mock';
-import { Link } from 'wouter';
+import { upcomingAppointments, inbox, bills, activities } from '@/data/mock';
+import { Link, useLocation } from 'wouter';
 import { Calendar, MessageSquare, FileText, CreditCard, Clock, ChevronRight, Activity } from 'lucide-react';
+import { STORAGE_KEYS } from '@/hooks/use-auth';
+
+type CurrentUser = {
+  name?: string;
+  initials?: string;
+  email?: string;
+};
+
+function loadCurrentUser(): CurrentUser | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    return raw ? (JSON.parse(raw) as CurrentUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
+  const [user] = useState<CurrentUser | null>(loadCurrentUser);
+  const [, setLocation] = useLocation();
 
   useEffect(() => {
     // Simulate loading data
@@ -41,6 +59,25 @@ export default function Dashboard() {
     );
   }
 
+  if (!user?.name || !user.email) {
+    return (
+      <AppShell title="Dashboard">
+        <div className="max-w-xl mx-auto rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <h2 className="text-xl font-bold text-foreground">Patient information unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            We couldn’t find the logged-in patient’s information. Please sign in again.
+          </p>
+          <button
+            onClick={() => setLocation('/login')}
+            className="mt-6 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+          >
+            Return to Sign In
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell title="Dashboard">
       <div className="space-y-8 animate-in fade-in duration-500">
@@ -48,10 +85,10 @@ export default function Dashboard() {
         {/* Welcome Section */}
         <div className="flex items-center gap-4">
           <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center shrink-0 border border-primary/20">
-            <span className="text-xl font-bold text-primary">{currentPatient.initials}</span>
+              <span className="text-xl font-bold text-primary">{user.initials || user.name.slice(0, 2).toUpperCase()}</span>
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-foreground">Good morning, {currentPatient.name.split(' ')[0]}</h2>
+            <h2 className="text-2xl font-bold text-foreground">Good morning, {user.name.trim().split(/\s+/)[0]}</h2>
             <p className="text-muted-foreground">Here is your health overview today.</p>
           </div>
         </div>

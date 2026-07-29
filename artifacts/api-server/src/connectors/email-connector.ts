@@ -1,17 +1,32 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import { logger } from "../lib/logger";
 
-let resendClient: Resend | null = null;
+let smtpTransport: nodemailer.Transporter | null = null;
 
-function getResendClient(): Resend {
-  if (!resendClient) {
-    const apiKey = process.env["RESEND_API_KEY"];
-    if (!apiKey) {
-      throw new Error("RESEND_API_KEY environment variable is not set");
-    }
-    resendClient = new Resend(apiKey);
+function getSmtpTransport(): nodemailer.Transporter {
+  if (smtpTransport) return smtpTransport;
+
+  const host = process.env["SMTP_HOST"];
+  const user = process.env["SMTP_USER"];
+  const pass = process.env["SMTP_PASS"];
+  const port = Number(process.env["SMTP_PORT"] ?? "587");
+  const secure = (process.env["SMTP_SECURE"] ?? "").toLowerCase() === "true" || port === 465;
+
+  if (!host) throw new Error("SMTP_HOST environment variable is not set");
+  if (!user) throw new Error("SMTP_USER environment variable is not set");
+  if (!pass) throw new Error("SMTP_PASS environment variable is not set");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error("SMTP_PORT must be a valid port number");
   }
-  return resendClient;
+
+  smtpTransport = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  });
+
+  return smtpTransport;
 }
 
 export type EmailResult = {
@@ -36,27 +51,25 @@ export type AppointmentEmailPayload = {
 export async function sendAppointmentEmail(
   payload: AppointmentEmailPayload,
 ): Promise<EmailResult> {
-  const fromAddress = process.env["EMAIL_FROM"] ?? "noreply@sugbodoc.com";
+  const fromAddress = process.env["EMAIL_FROM"] ?? process.env["SMTP_USER"];
 
   try {
-    const client = getResendClient();
-    const { data, error } = await client.emails.send({
+    if (!fromAddress) {
+      throw new Error("EMAIL_FROM or SMTP_USER environment variable is required");
+    }
+
+    const info = await getSmtpTransport().sendMail({
       from: fromAddress,
-      to: [payload.to],
+      to: payload.to,
       subject: `SugboDoc Appointment Confirmation — ${payload.appointmentReference}`,
       html: payload.htmlBody,
     });
 
-    if (error) {
-      logger.error({ error, ref: payload.appointmentReference }, "Resend API returned error");
-      return { success: false, error: error.message };
-    }
-
     logger.info(
-      { messageId: data?.id, ref: payload.appointmentReference },
+      { messageId: info.messageId, ref: payload.appointmentReference },
       "Appointment confirmation email sent",
     );
-    return { success: true, messageId: data?.id };
+    return { success: true, messageId: info.messageId };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown email error";
     logger.error({ err: message, ref: payload.appointmentReference }, "Failed to send email");

@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { bills as mockBills, pastBills } from '@/data/mock';
-import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck } from 'lucide-react';
+import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Billing() {
@@ -9,10 +9,62 @@ export default function Billing() {
   const [history, setHistory] = useState(pastBills);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState('card');
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { toast } = useToast();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    if (params.get('payment') !== 'success' || !sessionId) return;
+
+    const verifyPayment = async () => {
+      try {
+        const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+        const response = await fetch(`${base}/api/stripe/checkout-session/${encodeURIComponent(sessionId)}`);
+        const result = await response.json() as {
+          status?: string;
+          billId?: string;
+          error?: string;
+        };
+
+        if (!response.ok || result.status !== 'paid' || !result.billId) {
+          throw new Error(result.error ?? 'Payment has not been confirmed');
+        }
+
+        const billsToMarkPaid = result.billId === 'all-bills'
+          ? bills
+          : bills.filter((bill) => bill.id === result.billId);
+        if (billsToMarkPaid.length > 0) {
+          setBills((current) => current.filter((bill) => !billsToMarkPaid.some((paid) => paid.id === bill.id)));
+          setHistory((current) => [
+            ...billsToMarkPaid.map((bill) => ({
+              ...bill,
+              status: 'Paid',
+              receiptId: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
+            })),
+            ...current,
+          ]);
+          toast({
+            title: 'Payment Successful',
+            description: `Successfully paid ${formatMoney(billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0))} through Stripe.`,
+          });
+        } else {
+          toast({ title: 'Payment Confirmed', description: 'Your Stripe payment was received.' });
+        }
+      } catch (error) {
+        toast({
+          title: 'Payment Verification Pending',
+          description: error instanceof Error ? error.message : 'Please refresh shortly.',
+          variant: 'destructive',
+        });
+      } finally {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    };
+
+    void verifyPayment();
+  }, []);
 
   const totalOutstanding = bills.reduce((acc, b) => acc + b.amount, 0);
 
@@ -25,37 +77,43 @@ export default function Billing() {
     setIsPaymentModalOpen(true);
   };
 
-  const handlePayment = (e: React.FormEvent) => {
+  const handlePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsProcessing(true);
-    
-    // Simulate API delay
-    setTimeout(() => {
-      setIsProcessing(false);
-      setIsPaymentModalOpen(false);
-      
+
+    try {
       const billsToPay = selectedBill ? [selectedBill] : [...bills];
-      
-      // Update states
-      if (selectedBill) {
-        setBills(bills.filter(b => b.id !== selectedBill.id));
-      } else {
-        setBills([]);
-      }
-
-      const newHistoryItems = billsToPay.map(b => ({
-        ...b,
-        status: 'Paid',
-        receiptId: `RCP-${Math.floor(1000 + Math.random() * 9000)}`
-      }));
-
-      setHistory(prev => [...newHistoryItems, ...prev]);
-
-      toast({
-        title: "Payment Successful",
-        description: `Successfully paid ${formatMoney(billsToPay.reduce((sum, b) => sum + b.amount, 0))}.`,
+      const total = billsToPay.reduce((sum, bill) => sum + bill.amount, 0);
+      const currentUser = JSON.parse(localStorage.getItem('sugbodoc_current_user') ?? 'null') as
+        | { email?: string }
+        | null;
+      const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
+      const appBase = `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`;
+      const response = await fetch(`${base}/api/stripe/create-checkout-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billId: selectedBill?.id ?? 'all-bills',
+          description: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
+          amount: total,
+          patientEmail: currentUser?.email,
+          successUrl: `${appBase}billing?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancelUrl: `${appBase}billing?payment=cancelled`,
+        }),
       });
-    }, 1500);
+      const result = await response.json() as { checkoutUrl?: string; error?: string };
+      if (!response.ok || !result.checkoutUrl) {
+        throw new Error(result.error ?? 'Unable to start Stripe Checkout');
+      }
+      window.location.href = result.checkoutUrl;
+    } catch (error) {
+      setIsProcessing(false);
+      toast({
+        title: 'Unable to Start Payment',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const downloadReceipt = (receiptId: string) => {
@@ -175,53 +233,16 @@ export default function Billing() {
                 </div>
               </div>
 
-              <div>
-                <label className="text-sm font-semibold mb-3 block">Payment Method</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {['card', 'gcash', 'maya'].map(method => (
-                    <button
-                      key={method}
-                      type="button"
-                      onClick={() => setPaymentMethod(method)}
-                      className={`p-3 rounded-xl border text-center transition-all ${paymentMethod === method ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'}`}
-                    >
-                      <div className="font-bold text-sm capitalize">{method === 'card' ? 'Card' : method}</div>
-                    </button>
-                  ))}
-                </div>
+              <div className="rounded-xl border border-primary/15 bg-primary/5 p-5 text-center">
+                <ExternalLink className="h-8 w-8 text-primary mx-auto mb-3" />
+                <p className="font-semibold text-foreground">Secure Stripe Checkout</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  You’ll be redirected to Stripe to securely choose an available payment method and complete your payment.
+                </p>
               </div>
 
-              {paymentMethod === 'card' && (
-                <div className="space-y-4 animate-in fade-in">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Card Number</label>
-                    <div className="relative">
-                      <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                      <input type="text" placeholder="0000 0000 0000 0000" className="w-full h-11 pl-10 pr-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm" required />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Expiry</label>
-                      <input type="text" placeholder="MM/YY" className="w-full h-11 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm" required />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground mb-1.5 block">CVV</label>
-                      <input type="text" placeholder="123" className="w-full h-11 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono text-sm" required />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {(paymentMethod === 'gcash' || paymentMethod === 'maya') && (
-                <div className="p-6 text-center border border-dashed border-border rounded-xl animate-in fade-in">
-                  <p className="text-sm text-muted-foreground mb-4">You will be redirected to the {paymentMethod.toUpperCase()} app to authorize this transaction securely.</p>
-                  <img src={`https://ui-avatars.com/api/?name=${paymentMethod}&background=random&color=fff&size=64&rounded=true`} alt={paymentMethod} className="mx-auto rounded-xl w-12 h-12 grayscale-[50%]" />
-                </div>
-              )}
-
               <div className="flex items-center gap-2 text-xs text-muted-foreground justify-center mt-2">
-                <ShieldCheck className="h-4 w-4 text-emerald-500" /> Secure 256-bit encryption
+                <ShieldCheck className="h-4 w-4 text-emerald-500" /> Payment details are handled securely by Stripe
               </div>
 
               <button 

@@ -1,20 +1,35 @@
 import { useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { currentPatient } from '@/data/mock';
-import { useAuth } from '@/hooks/use-auth';
-import { User, Bell, Globe, Moon, LogOut, Edit3, HeartPulse, Phone } from 'lucide-react';
+import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
+import { Bell, Globe, Moon, LogOut, Edit3, HeartPulse, Phone, UserRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+
+type StoredUser = {
+  name: string;
+  initials: string;
+  email: string;
+  password?: string;
+  phone: string;
+  birthday: string;
+  gender: string;
+  bloodType: string;
+};
+
+function loadCurrentUser(): StoredUser | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    return raw ? (JSON.parse(raw) as StoredUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function Profile() {
   const { logout } = useAuth();
   const { toast } = useToast();
-  
+  const [user, setUser] = useState<StoredUser | null>(loadCurrentUser);
   const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({
-    email: 'juan.delacruz@example.com',
-    phone: '+63 912 345 6789',
-    address: '123 Mango Avenue, Cebu City, Philippines'
-  });
+  const [formData, setFormData] = useState<StoredUser | null>(loadCurrentUser);
 
   // Toggles state
   const [toggles, setToggles] = useState({
@@ -41,12 +56,60 @@ export default function Profile() {
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user || !formData) return;
+    const email = formData.email.trim().toLowerCase();
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast({ title: 'Invalid email address', description: 'Please enter a valid email address.', variant: 'destructive' });
+      return;
+    }
+
+    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) ?? '[]');
+    const duplicate = users.some((candidate) =>
+      candidate.email.toLowerCase() === email && candidate.email.toLowerCase() !== user.email.toLowerCase()
+    );
+    if (duplicate) {
+      toast({ title: 'Email already in use', description: 'Another registered account uses that email address.', variant: 'destructive' });
+      return;
+    }
+
+    const parts = formData.name.trim().split(/\s+/).filter(Boolean);
+    const updatedUser: StoredUser = {
+      ...formData,
+      name: formData.name.trim(),
+      email,
+      initials: parts.length > 1
+        ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+        : (parts[0]?.slice(0, 2) || 'U').toUpperCase(),
+    };
+    const updatedUsers = users.map((candidate) =>
+      candidate.email.toLowerCase() === user.email.toLowerCase()
+        ? { ...candidate, ...updatedUser, password: candidate.password }
+        : candidate
+    );
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedUser));
+    setUser(updatedUser);
+    setFormData(updatedUser);
     setIsEditing(false);
     toast({
       title: "Profile Updated",
       description: "Your personal information has been successfully saved.",
     });
   };
+
+  if (!user || !formData) {
+    return (
+      <AppShell title="Profile & Settings">
+        <div className="max-w-xl mx-auto rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <UserRound className="mx-auto h-10 w-10 text-muted-foreground" />
+          <h2 className="mt-4 text-xl font-bold text-foreground">Profile information unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            No logged-in patient information is available. Please sign in again.
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell title="Profile & Settings">
@@ -59,13 +122,13 @@ export default function Profile() {
           <div className="px-6 pt-16 pb-6 relative z-10 flex flex-col sm:flex-row gap-6 items-start sm:items-end">
             <div className="h-24 w-24 rounded-full bg-card p-1 border-4 border-card shadow-lg shrink-0 flex items-center justify-center">
               <div className="h-full w-full rounded-full bg-primary/10 flex items-center justify-center text-3xl font-bold text-primary">
-                {currentPatient.initials}
+                {user.initials}
               </div>
             </div>
             
             <div className="flex-1 pb-2">
-              <h2 className="text-2xl font-bold text-foreground">{currentPatient.name}</h2>
-              <p className="text-muted-foreground">{currentPatient.gender}, {currentPatient.age} yrs • DOB: {currentPatient.dob}</p>
+              <h2 className="text-2xl font-bold text-foreground">{user.name}</h2>
+              <p className="text-muted-foreground">{user.gender || 'Gender not provided'} • DOB: {user.birthday || 'Birthday not provided'}</p>
             </div>
 
             <button 
@@ -81,6 +144,15 @@ export default function Profile() {
             {isEditing ? (
               <form onSubmit={handleSaveProfile} className="space-y-4 animate-in fade-in bg-muted/30 p-5 rounded-xl border border-border">
                 <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Full Name</label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={e => setFormData({...formData, name: e.target.value})}
+                      className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm"
+                    />
+                  </div>
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Email</label>
                     <input 
@@ -99,12 +171,41 @@ export default function Profile() {
                       className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm" 
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Birthday</label>
+                    <input
+                      type="date"
+                      value={formData.birthday}
+                      onChange={e => setFormData({...formData, birthday: e.target.value})}
+                      className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Gender</label>
+                    <select
+                      value={formData.gender}
+                      onChange={e => setFormData({...formData, gender: e.target.value})}
+                      className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm"
+                    >
+                      <option value="">Not specified</option>
+                      <option>Male</option><option>Female</option><option>Other</option><option>Prefer not to say</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Blood Type</label>
+                    <input
+                      type="text"
+                      value={formData.bloodType}
+                      onChange={e => setFormData({...formData, bloodType: e.target.value})}
+                      className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm"
+                    />
+                  </div>
                   <div className="sm:col-span-2">
-                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Address</label>
+                    <label className="text-xs font-semibold text-muted-foreground mb-1.5 block uppercase tracking-wider">Phone Number</label>
                     <input 
-                      type="text" 
-                      value={formData.address}
-                      onChange={e => setFormData({...formData, address: e.target.value})}
+                      type="tel"
+                      value={formData.phone}
+                      onChange={e => setFormData({...formData, phone: e.target.value})}
                       className="w-full h-10 px-3 rounded-lg border border-input bg-background focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm" 
                     />
                   </div>
@@ -118,16 +219,18 @@ export default function Profile() {
               <div className="grid sm:grid-cols-2 gap-6 pt-4 border-t border-border mt-4">
                 <div className="space-y-4">
                   <div className="flex items-start gap-3">
+                    <UserRound className="h-5 w-5 text-primary mt-0.5" />
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Contact Information</p>
+                      <p className="font-medium mt-1">{user.email}</p>
+                      <p className="text-sm text-muted-foreground mt-1">{user.phone || 'Phone not provided'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
                     <HeartPulse className="h-5 w-5 text-destructive mt-0.5" />
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Medical Info</p>
-                      <p className="font-medium mt-1">Blood Type: <span className="text-primary font-bold">{currentPatient.bloodType}</span></p>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="text-xs font-medium text-muted-foreground">Allergies:</span>
-                        {currentPatient.allergies.map(a => (
-                          <span key={a} className="text-[10px] bg-destructive/10 text-destructive px-2 py-0.5 rounded uppercase font-bold">{a}</span>
-                        ))}
-                      </div>
+                       <p className="font-medium mt-1">Blood Type: <span className="text-primary font-bold">{user.bloodType || 'Not provided'}</span></p>
                     </div>
                   </div>
                 </div>
@@ -136,8 +239,8 @@ export default function Profile() {
                     <Phone className="h-5 w-5 text-amber-500 mt-0.5" />
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Emergency Contact</p>
-                      <p className="font-bold text-foreground mt-1">{currentPatient.emergencyContact.name}</p>
-                      <p className="text-sm font-medium text-muted-foreground">{currentPatient.emergencyContact.number}</p>
+                      <p className="font-bold text-foreground mt-1">Phone Number</p>
+                      <p className="text-sm font-medium text-muted-foreground">{user.phone || 'Not provided'}</p>
                     </div>
                   </div>
                 </div>
