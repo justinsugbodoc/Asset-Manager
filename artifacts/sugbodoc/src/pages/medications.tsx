@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { 
   Search, ShoppingBag, Pill, Plus, Minus, Store, Truck, 
-  MapPin, CheckCircle2, Clock, Activity, X, AlertCircle
+  MapPin, CheckCircle2, Clock, Activity, X, AlertCircle, ArrowRight,
+  LockKeyhole
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -48,6 +49,7 @@ export default function Medications() {
   
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(false);
+  const [isFulfillmentModalOpen, setIsFulfillmentModalOpen] = useState(false);
 
   const [fulfillmentMode, setFulfillmentMode] = useState<'delivery' | 'pickup'>('delivery');
   const [deliveryForm, setDeliveryForm] = useState(() => safeJSONParse(
@@ -157,16 +159,18 @@ export default function Medications() {
 
   const MINIMUM_ORDER_PHP = 50;
 
-  const isCheckoutValid = useMemo(() => {
-    if (cartItems.length === 0) return false;
-    if (total < MINIMUM_ORDER_PHP) return false;
+  const isFulfillmentValid = useMemo(() => {
     if (fulfillmentMode === 'delivery') {
       return deliveryForm.recipientName.trim() !== '' && 
              deliveryForm.phone.trim() !== '' && 
              deliveryForm.address.trim() !== '';
     }
     return !!pickupLocation;
-  }, [cartItems, fulfillmentMode, deliveryForm, pickupLocation, total]);
+  }, [fulfillmentMode, deliveryForm, pickupLocation]);
+
+  const isCheckoutValid = cartItems.length > 0 &&
+    total >= MINIMUM_ORDER_PHP &&
+    isFulfillmentValid;
 
   const addToCart = (med: any) => {
     setCartItems(current => {
@@ -409,84 +413,6 @@ export default function Medications() {
                   </div>
                 </div>
 
-                {/* Fulfillment */}
-                <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm">
-                  <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                    <Truck className="h-5 w-5 text-primary" /> Fulfillment Method
-                  </h3>
-                  
-                  <div className="grid grid-cols-2 gap-3 mb-6 bg-muted/40 p-1.5 rounded-xl border border-border">
-                    <button 
-                      onClick={() => setFulfillmentMode('delivery')}
-                      className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${fulfillmentMode === 'delivery' ? 'bg-background shadow-sm text-primary border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                      <Truck className="h-4 w-4" /> Delivery
-                    </button>
-                    <button 
-                      onClick={() => setFulfillmentMode('pickup')}
-                      className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-bold transition-all ${fulfillmentMode === 'pickup' ? 'bg-background shadow-sm text-primary border border-border/50' : 'text-muted-foreground hover:text-foreground'}`}
-                    >
-                      <Store className="h-4 w-4" /> Store Pickup
-                    </button>
-                  </div>
-
-                  {fulfillmentMode === 'delivery' ? (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
-                      <div>
-                        <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Recipient Name</label>
-                        <input 
-                          type="text" 
-                          value={deliveryForm.recipientName}
-                          onChange={e => setDeliveryForm(prev => ({ ...prev, recipientName: e.target.value }))}
-                          className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm transition-shadow"
-                          placeholder="Full name"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Phone Number</label>
-                        <input 
-                          type="tel" 
-                          value={deliveryForm.phone}
-                          onChange={e => setDeliveryForm(prev => ({ ...prev, phone: e.target.value }))}
-                          className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm transition-shadow"
-                          placeholder="e.g. 0917..."
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Complete Address</label>
-                        <textarea 
-                          value={deliveryForm.address}
-                          onChange={e => setDeliveryForm(prev => ({ ...prev, address: e.target.value }))}
-                          className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[100px] resize-none shadow-sm transition-shadow"
-                          placeholder="House/Unit No., Street, Barangay, City, Province"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
-                      <div>
-                        <label className="text-xs font-bold text-muted-foreground mb-2 block uppercase tracking-wider">Select Partner Location</label>
-                        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
-                          {PARTNER_LOCATIONS.map(loc => (
-                            <button
-                              key={loc}
-                              onClick={() => setPickupLocation(loc)}
-                              className={`w-full flex flex-col md:flex-row md:items-center gap-3 p-4 rounded-xl border text-left transition-all ${pickupLocation === loc ? 'border-primary bg-primary/5 shadow-sm' : 'border-border bg-background hover:border-primary/30'}`}
-                            >
-                              <div className="flex items-center gap-3 w-full">
-                                <div className={`p-2 rounded-lg shrink-0 ${pickupLocation === loc ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
-                                  <MapPin className="h-5 w-5" />
-                                </div>
-                                <span className={`text-sm font-bold flex-1 ${pickupLocation === loc ? 'text-primary' : 'text-foreground'}`}>{loc}</span>
-                                {pickupLocation === loc && <CheckCircle2 className="h-5 w-5 text-primary ml-auto shrink-0" />}
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
 
               {/* Summary */}
@@ -509,23 +435,21 @@ export default function Medications() {
                   </div>
                   
                   <button 
-                    disabled={!isCheckoutValid || isCheckingOut}
-                    onClick={handleCheckout}
+                    disabled={cartItems.length === 0 || total < MINIMUM_ORDER_PHP || isCheckingOut}
+                    onClick={() => setIsFulfillmentModalOpen(true)}
                     className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:bg-primary/90 shadow-md hover:shadow-lg active:scale-95"
                   >
                     {isCheckingOut ? (
                       <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : (
-                      <>Place Order • ₱{total.toFixed(2)}</>
+                      <>Place Order • ₱{total.toFixed(2)} <ArrowRight className="h-4 w-4" /></>
                     )}
                   </button>
                   
-                  {!isCheckoutValid && cartItems.length > 0 && (
+                  {total < MINIMUM_ORDER_PHP && cartItems.length > 0 && (
                     <p className="text-xs text-center text-amber-600 dark:text-amber-400 mt-4 font-medium flex items-center justify-center gap-1">
                       <AlertCircle className="h-3.5 w-3.5" />
-                      {total < MINIMUM_ORDER_PHP
-                        ? `Minimum order is ₱${MINIMUM_ORDER_PHP.toFixed(2)}`
-                        : 'Please complete fulfillment details'}
+                      Minimum order is ₱{MINIMUM_ORDER_PHP.toFixed(2)}
                     </p>
                   )}
                 </div>
@@ -606,6 +530,172 @@ export default function Medications() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {isFulfillmentModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsFulfillmentModalOpen(false);
+          }}
+        >
+          <div
+            className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl animate-in zoom-in-95 slide-in-from-bottom-2"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="fulfillment-modal-title"
+          >
+          <div className="px-6 pt-6 pb-5 border-b border-border bg-gradient-to-br from-primary/10 via-background to-background">
+            <div className="flex items-start gap-3 pr-8">
+              <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                <Truck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 id="fulfillment-modal-title" className="text-xl font-semibold leading-none tracking-tight">How would you like to receive your order?</h2>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  Choose a fulfillment method and confirm your details before secure payment.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              aria-label="Close fulfillment options"
+              onClick={() => setIsFulfillmentModalOpen(false)}
+              className="absolute right-4 top-4 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="max-h-[calc(85vh-190px)] overflow-y-auto px-6 py-5">
+            <div className="grid grid-cols-2 gap-3 rounded-2xl bg-muted/50 p-1.5 border border-border">
+              <button
+                type="button"
+                onClick={() => setFulfillmentMode('delivery')}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all ${
+                  fulfillmentMode === 'delivery'
+                    ? 'bg-background text-primary shadow-sm ring-1 ring-primary/20'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Truck className="h-5 w-5 shrink-0" />
+                <span>
+                  <span className="block text-sm font-bold">Delivery</span>
+                  <span className="block text-[11px] font-medium opacity-75">To your address</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFulfillmentMode('pickup')}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 text-left transition-all ${
+                  fulfillmentMode === 'pickup'
+                    ? 'bg-background text-primary shadow-sm ring-1 ring-primary/20'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Store className="h-5 w-5 shrink-0" />
+                <span>
+                  <span className="block text-sm font-bold">Store pickup</span>
+                  <span className="block text-[11px] font-medium opacity-75">At a partner location</span>
+                </span>
+              </button>
+            </div>
+
+            {fulfillmentMode === 'delivery' ? (
+              <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-top-2">
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Recipient name</label>
+                  <input
+                    type="text"
+                    value={deliveryForm.recipientName}
+                    onChange={e => setDeliveryForm(prev => ({ ...prev, recipientName: e.target.value }))}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm transition-shadow"
+                    placeholder="Full name"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Phone number</label>
+                  <input
+                    type="tel"
+                    value={deliveryForm.phone}
+                    onChange={e => setDeliveryForm(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 shadow-sm transition-shadow"
+                    placeholder="e.g. 0917 123 4567"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-muted-foreground mb-1.5 block uppercase tracking-wider">Complete delivery address</label>
+                  <textarea
+                    value={deliveryForm.address}
+                    onChange={e => setDeliveryForm(prev => ({ ...prev, address: e.target.value }))}
+                    className="w-full bg-background border border-border rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-primary/40 min-h-[100px] resize-none shadow-sm transition-shadow"
+                    placeholder="House/Unit No., Street, Barangay, City, Province"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 animate-in fade-in slide-in-from-top-2">
+                <label className="text-xs font-bold text-muted-foreground mb-2 block uppercase tracking-wider">Select partner location</label>
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  {PARTNER_LOCATIONS.map(loc => (
+                    <button
+                      type="button"
+                      key={loc}
+                      onClick={() => setPickupLocation(loc)}
+                      className={`w-full flex items-center gap-3 p-4 rounded-xl border text-left transition-all ${
+                        pickupLocation === loc
+                          ? 'border-primary bg-primary/5 shadow-sm'
+                          : 'border-border bg-background hover:border-primary/30'
+                      }`}
+                    >
+                      <div className={`p-2 rounded-lg shrink-0 ${
+                        pickupLocation === loc ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                      }`}>
+                        <MapPin className="h-5 w-5" />
+                      </div>
+                      <span className={`text-sm font-bold flex-1 ${
+                        pickupLocation === loc ? 'text-primary' : 'text-foreground'
+                      }`}>{loc}</span>
+                      {pickupLocation === loc && <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border bg-muted/20 px-6 py-4">
+            {!isFulfillmentValid && (
+              <p className="mb-3 text-xs font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Complete the required details to continue.
+              </p>
+            )}
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Total to pay</p>
+                <p className="text-xl font-bold text-primary">₱{total.toFixed(2)}</p>
+              </div>
+              <button
+                type="button"
+                disabled={!isCheckoutValid || isCheckingOut}
+                onClick={handleCheckout}
+                className="w-full sm:w-auto bg-primary text-primary-foreground px-5 py-3 rounded-xl font-bold flex items-center justify-center gap-2 disabled:opacity-50 transition-all hover:bg-primary/90 shadow-md active:scale-95"
+              >
+                {isCheckingOut ? (
+                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <LockKeyhole className="h-4 w-4" />
+                    Continue to secure payment
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          </div>
         </div>
       )}
     </AppShell>
