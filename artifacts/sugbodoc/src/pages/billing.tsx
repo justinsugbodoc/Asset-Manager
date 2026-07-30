@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { bills as mockBills, pastBills } from '@/data/mock';
 import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 
 export default function Billing() {
   const [bills, setBills] = useState(mockBills);
@@ -12,6 +13,7 @@ export default function Billing() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { toast } = useToast();
+  const insurance = useMemo(() => loadInsurance(), []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -37,14 +39,47 @@ export default function Billing() {
           : bills.filter((bill) => bill.id === result.billId);
         if (billsToMarkPaid.length > 0) {
           setBills((current) => current.filter((bill) => !billsToMarkPaid.some((paid) => paid.id === bill.id)));
+          const draft = (() => {
+            try {
+              const raw = localStorage.getItem('sugbodoc_billing_checkout_draft');
+              return raw ? JSON.parse(raw) as {
+                originalAmount: number;
+                estimatedCoverage: number;
+                patientBalance: number;
+                provider: string;
+              } : null;
+            } catch {
+              return null;
+            }
+          })();
+          const paidOriginalAmount = draft?.originalAmount ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0);
+          const paidEstimatedCoverage = draft?.estimatedCoverage ?? 0;
           setHistory((current) => [
             ...billsToMarkPaid.map((bill) => ({
               ...bill,
               status: 'Paid',
               receiptId: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
+              originalAmount: billsToMarkPaid.length === 1 ? paidOriginalAmount : bill.amount,
+              estimatedInsuranceCoverage: billsToMarkPaid.length === 1
+                ? paidEstimatedCoverage
+                : calculateInsuranceEstimate(bill.amount, insurance, 'bill').estimatedCoverage,
+              patientBalance: billsToMarkPaid.length === 1
+                ? draft?.patientBalance ?? bill.amount
+                : calculateInsuranceEstimate(bill.amount, insurance, 'bill').patientBalance,
             })),
             ...current,
           ]);
+          createOrUpdateClaim({
+            relatedType: 'bill',
+            relatedId: result.billId,
+            relatedLabel: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
+            originalAmount: draft?.originalAmount ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0),
+            estimatedCoverage: draft?.estimatedCoverage ?? 0,
+            patientBalance: draft?.patientBalance ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0),
+            status: 'Processing',
+            provider: draft?.provider ?? insurance?.provider ?? 'Testing estimate',
+          });
+          localStorage.removeItem('sugbodoc_billing_checkout_draft');
           toast({
             title: 'Payment Successful',
             description: `Successfully paid ${formatMoney(billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0))} through Stripe.`,
@@ -67,6 +102,7 @@ export default function Billing() {
   }, []);
 
   const totalOutstanding = bills.reduce((acc, b) => acc + b.amount, 0);
+  const outstandingEstimate = calculateInsuranceEstimate(totalOutstanding, insurance, 'bill');
 
   const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount);
@@ -83,7 +119,9 @@ export default function Billing() {
 
     try {
       const billsToPay = selectedBill ? [selectedBill] : [...bills];
-      const total = billsToPay.reduce((sum, bill) => sum + bill.amount, 0);
+      const originalAmount = billsToPay.reduce((sum, bill) => sum + bill.amount, 0);
+      const estimate = calculateInsuranceEstimate(originalAmount, insurance, 'bill');
+      const total = estimate.patientBalance;
       const currentUser = JSON.parse(localStorage.getItem('sugbodoc_current_user') ?? 'null') as
         | { email?: string }
         | null;
@@ -96,6 +134,7 @@ export default function Billing() {
           billId: selectedBill?.id ?? 'all-bills',
           description: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
           amount: total,
+          insuranceCoverageAmount: estimate.estimatedCoverage,
           patientEmail: currentUser?.email,
           successUrl: `${appBase}billing?payment=success&session_id={CHECKOUT_SESSION_ID}`,
           cancelUrl: `${appBase}billing?payment=cancelled`,
@@ -105,6 +144,13 @@ export default function Billing() {
       if (!response.ok || !result.checkoutUrl) {
         throw new Error(result.error ?? 'Unable to start Stripe Checkout');
       }
+      localStorage.setItem('sugbodoc_billing_checkout_draft', JSON.stringify({
+        billIds: billsToPay.map(bill => bill.id),
+        originalAmount,
+        estimatedCoverage: estimate.estimatedCoverage,
+        patientBalance: estimate.patientBalance,
+        provider: insurance?.provider ?? 'Testing estimate',
+      }));
       window.location.href = result.checkoutUrl;
     } catch (error) {
       setIsProcessing(false);
@@ -132,8 +178,11 @@ export default function Billing() {
           <CreditCard className="w-32 h-32 -rotate-12 translate-x-4 -translate-y-4" />
         </div>
         <div className="relative z-10">
-          <p className="text-primary-foreground/80 font-medium mb-1">Total Outstanding</p>
-          <h2 className="text-4xl font-bold mb-4">{formatMoney(totalOutstanding)}</h2>
+          <p className="text-primary-foreground/80 font-medium mb-1">Estimated Patient Balance</p>
+          <h2 className="text-4xl font-bold mb-2">{formatMoney(outstandingEstimate.patientBalance)}</h2>
+          <p className="mb-4 text-sm text-primary-foreground/75">
+            Original {formatMoney(totalOutstanding)} · Estimated coverage {formatMoney(outstandingEstimate.estimatedCoverage)}
+          </p>
           {bills.length > 0 ? (
             <button 
               onClick={() => openPayment()}
@@ -163,7 +212,17 @@ export default function Billing() {
                     <p className="text-sm text-muted-foreground">{bill.date}</p>
                   </div>
                   <div className="flex flex-col items-end gap-2">
-                    <span className="font-bold text-lg">{formatMoney(bill.amount)}</span>
+                    {(() => {
+                      const estimate = calculateInsuranceEstimate(bill.amount, insurance, 'bill');
+                      return (
+                        <div className="text-right">
+                          <span className="font-bold text-lg">{formatMoney(estimate.patientBalance)}</span>
+                          {estimate.estimatedCoverage > 0 && (
+                            <p className="text-[11px] text-emerald-600">Est. coverage {formatMoney(estimate.estimatedCoverage)}</p>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <button 
                       onClick={() => openPayment(bill)}
                       className="text-xs font-bold bg-primary/10 text-primary px-4 py-1.5 rounded-lg hover:bg-primary hover:text-primary-foreground transition-colors"
@@ -223,15 +282,30 @@ export default function Billing() {
             
             <form onSubmit={handlePayment} className="p-5 space-y-6">
               
-              <div className="bg-primary/5 rounded-xl p-4 border border-primary/10 flex justify-between items-center">
+                {(() => {
+                  const estimate = calculateInsuranceEstimate(
+                    selectedBill ? selectedBill.amount : totalOutstanding,
+                    insurance,
+                    'bill',
+                  );
+                  return (
+                    <div className="space-y-2 rounded-xl border border-primary/10 bg-primary/5 p-4">
+                      <div className="flex justify-between items-center">
                 <div>
                   <p className="text-sm text-primary font-medium">{selectedBill ? 'Selected Bill' : 'Total Outstanding'}</p>
                   <p className="text-xs text-muted-foreground">{selectedBill?.description || 'All pending bills'}</p>
                 </div>
-                <div className="text-2xl font-bold text-foreground">
-                  {formatMoney(selectedBill ? selectedBill.amount : totalOutstanding)}
-                </div>
-              </div>
+                        <div className="text-2xl font-bold text-foreground">{formatMoney(estimate.patientBalance)}</div>
+                      </div>
+                      <div className="border-t border-primary/10 pt-2 text-xs">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Original amount</span><span>{formatMoney(estimate.originalAmount)}</span></div>
+                        <div className="mt-1 flex justify-between"><span className="text-muted-foreground">Estimated insurance coverage</span><span className="text-emerald-600">−{formatMoney(estimate.estimatedCoverage)}</span></div>
+                        <div className="mt-1 flex justify-between font-bold"><span>Patient balance</span><span className="text-primary">{formatMoney(estimate.patientBalance)}</span></div>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Testing estimate only · {insurance?.provider || 'No active provider'}</p>
+                    </div>
+                  );
+                })()}
 
               <div className="rounded-xl border border-primary/15 bg-primary/5 p-5 text-center">
                 <ExternalLink className="h-8 w-8 text-primary mx-auto mb-3" />
@@ -253,7 +327,7 @@ export default function Billing() {
                 {isProcessing ? (
                   <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <>Pay {formatMoney(selectedBill ? selectedBill.amount : totalOutstanding)}</>
+                  <>Pay {formatMoney(calculateInsuranceEstimate(selectedBill ? selectedBill.amount : totalOutstanding, insurance, 'bill').patientBalance)}</>
                 )}
               </button>
             </form>

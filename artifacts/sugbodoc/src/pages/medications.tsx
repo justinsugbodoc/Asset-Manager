@@ -6,6 +6,11 @@ import {
   LockKeyhole
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import {
+  calculateInsuranceEstimate,
+  createOrUpdateClaim,
+  loadInsurance,
+} from '@/lib/insurance';
 
 // Dummy catalog data
 const MEDICATIONS_CATALOG = [
@@ -57,6 +62,7 @@ export default function Medications() {
     { recipientName: currentUser?.name || '', phone: currentUser?.phone || '', address: '' },
   ));
   const [pickupLocation, setPickupLocation] = useState(PARTNER_LOCATIONS[0]);
+  const insurance = useMemo(() => loadInsurance(), []);
 
   // Sync to localStorage
   useEffect(() => {
@@ -104,7 +110,13 @@ export default function Medications() {
           const draft = safeJSONParse<{
             items: any[];
             fulfillmentDetails: any;
-            totals: { subtotal: number; deliveryFee: number; total: number };
+            totals: {
+              subtotal: number;
+              estimatedInsuranceCoverage?: number;
+              patientMedicationBalance?: number;
+              deliveryFee: number;
+              total: number;
+            };
             createdAt: string;
             status: string;
           } | null>(localStorage.getItem('sugbodoc_medication_checkout_draft'), null);
@@ -128,6 +140,16 @@ export default function Medications() {
           });
 
           setCartItems([]);
+          createOrUpdateClaim({
+            relatedType: 'medication',
+            relatedId: result.medicationOrderId,
+            relatedLabel: `Medication order ${result.medicationOrderId}`,
+            originalAmount: draft.totals.subtotal,
+            estimatedCoverage: draft.totals.estimatedInsuranceCoverage ?? 0,
+            patientBalance: draft.totals.patientMedicationBalance ?? draft.totals.total - draft.totals.deliveryFee,
+            status: 'Processing',
+            provider: insurance?.provider ?? 'Testing estimate',
+          });
           localStorage.removeItem('sugbodoc_medication_checkout_draft');
           setActiveTab('orders');
           toast({ title: 'Order Successful', description: 'Your medication order has been placed and is now pending fulfillment.' });
@@ -155,7 +177,10 @@ export default function Medications() {
 
   const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const deliveryFee = fulfillmentMode === 'delivery' ? 99 : 0;
-  const total = subtotal + deliveryFee;
+  const medicationEstimate = calculateInsuranceEstimate(subtotal, insurance, 'medication');
+  const estimatedInsuranceCoverage = medicationEstimate.estimatedCoverage;
+  const patientMedicationBalance = medicationEstimate.patientBalance;
+  const total = patientMedicationBalance + deliveryFee;
 
   const MINIMUM_ORDER_PHP = 50;
 
@@ -216,7 +241,13 @@ export default function Medications() {
           mode: 'pickup',
           location: pickupLocation
         },
-        totals: { subtotal, deliveryFee, total },
+        totals: {
+          subtotal,
+          estimatedInsuranceCoverage,
+          patientMedicationBalance,
+          deliveryFee,
+          total,
+        },
         createdAt: new Date().toISOString(),
         status: 'Pending',
       };
@@ -230,6 +261,7 @@ export default function Medications() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cartItems: cartItems.map(({ id, quantity }) => ({ id, quantity })),
+          insuranceCoverageAmount: estimatedInsuranceCoverage,
           fulfillmentDetails: orderPayload.fulfillmentDetails,
           patientEmail: currentUser?.email,
           successUrl: `${appBase}medications?payment=success&session_id={CHECKOUT_SESSION_ID}`,
@@ -447,14 +479,25 @@ export default function Medications() {
                   <h3 className="font-bold text-lg mb-5">Order Summary</h3>
                   <div className="space-y-3 text-sm mb-6">
                     <div className="flex justify-between text-muted-foreground font-medium">
-                      <span>Subtotal ({cartItems.length} items)</span>
+                      <span>Original medicine amount ({cartItems.length} items)</span>
                       <span className="text-foreground">₱{subtotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground font-medium">
+                      <span>Estimated insurance coverage</span>
+                      <span className="text-emerald-600">−₱{estimatedInsuranceCoverage.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold">
+                      <span>Patient medicine balance</span>
+                      <span className="text-foreground">₱{patientMedicationBalance.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-muted-foreground font-medium">
                       <span>Delivery Fee</span>
                       <span className="text-foreground">{deliveryFee === 0 ? 'Free' : `₱${deliveryFee.toFixed(2)}`}</span>
                     </div>
                   </div>
+                  <p className="mb-5 text-[11px] text-muted-foreground">
+                    Testing estimate only · {insurance?.provider || 'No active provider'} · Delivery fees are not covered.
+                  </p>
                   <div className="flex justify-between font-bold text-xl pt-5 border-t border-border border-dashed mb-6">
                     <span>Total</span>
                     <span className="text-primary">₱{total.toFixed(2)}</span>
@@ -546,6 +589,19 @@ export default function Medications() {
                         <span className="font-bold text-foreground">₱{(item.price * item.quantity).toFixed(2)}</span>
                       </div>
                     ))}
+                  </div>
+
+                  <div className="mb-6 rounded-xl border border-primary/10 bg-primary/5 p-4 text-sm">
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="font-bold text-primary">Payment breakdown</h4>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Estimate</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between"><span className="text-muted-foreground">Original medicines</span><span>₱{order.totals.subtotal.toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Estimated insurance coverage</span><span className="text-emerald-600">−₱{(order.totals.estimatedInsuranceCoverage ?? 0).toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Delivery fee</span><span>₱{order.totals.deliveryFee.toFixed(2)}</span></div>
+                      <div className="flex justify-between border-t border-primary/10 pt-1.5 font-bold"><span>Paid patient balance</span><span className="text-primary">₱{order.totals.total.toFixed(2)}</span></div>
+                    </div>
                   </div>
                   
                   <div className="bg-background border border-border p-4 rounded-xl flex items-start gap-4">
@@ -713,7 +769,7 @@ export default function Medications() {
             )}
             <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <p className="text-xs font-medium text-muted-foreground">Total to pay</p>
+                <p className="text-xs font-medium text-muted-foreground">Patient balance to pay</p>
                 <p className="text-xl font-bold text-primary">₱{total.toFixed(2)}</p>
               </div>
               <button
@@ -732,6 +788,11 @@ export default function Medications() {
                 )}
               </button>
             </div>
+              <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-border pt-3 text-xs">
+                <span className="text-muted-foreground">Original medicines</span><span className="text-right">₱{subtotal.toFixed(2)}</span>
+                <span className="text-muted-foreground">Estimated insurance coverage</span><span className="text-right text-emerald-600">−₱{estimatedInsuranceCoverage.toFixed(2)}</span>
+                <span className="text-muted-foreground">Delivery fee</span><span className="text-right">₱{deliveryFee.toFixed(2)}</span>
+              </div>
           </div>
           </div>
         </div>

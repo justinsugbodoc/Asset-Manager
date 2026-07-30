@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Home, Calendar, FileText, MessageSquare, CreditCard, User, LogOut, Bell, Pill } from 'lucide-react';
+import { Home, Calendar, FileText, MessageSquare, CreditCard, User, Bell, Pill, ShieldCheck } from 'lucide-react';
 import Logo from '@/components/brand/logo';
 
 type ShellProps = {
@@ -18,7 +18,8 @@ export default function AppShell({ children, title }: ShellProps) {
     { icon: MessageSquare, label: 'Messages', path: '/messages' },
     { icon: Pill, label: 'Medications', path: '/medications' },
     { icon: CreditCard, label: 'Billing', path: '/billing' },
-    { icon: User, label: 'Profile', path: '/profile' }
+    { icon: User, label: 'Profile', path: '/profile' },
+    { icon: ShieldCheck, label: 'Insurance Claims', path: '/insurance-claims' }
   ];
 
   return (
@@ -75,7 +76,7 @@ export default function AppShell({ children, title }: ShellProps) {
       <div className="lg:hidden fixed bottom-0 left-0 right-0 h-[68px] bg-card border-t border-border flex items-center justify-around px-1 z-50 pb-safe">
         {navItems.map((item) => {
           // Keep the mobile bar focused on the most-used patient actions.
-          if (item.path === '/billing' || item.path === '/medications') return null;
+          if (item.path === '/billing' || item.path === '/medications' || item.path === '/insurance-claims') return null;
 
           const isActive = location === item.path || (item.path !== '/' && location.startsWith(item.path));
           return (

@@ -12,6 +12,7 @@ import Messages from '@/pages/messages';
 import Billing from '@/pages/billing';
 import Medications from '@/pages/medications';
 import Profile from '@/pages/profile';
+import InsuranceClaims from '@/pages/insurance-claims';
 import NotFound from '@/pages/not-found';
 
 function ProtectedRoute({ component: Component, ...rest }: any) {
@@ -54,6 +55,9 @@ export function AppRoutes() {
       </Route>
       <Route path="/profile">
         {() => <ProtectedRoute component={Profile} />}
+      </Route>
+      <Route path="/insurance-claims">
+        {() => <ProtectedRoute component={InsuranceClaims} />}
       </Route>
       <Route component={NotFound} />
     </Switch>

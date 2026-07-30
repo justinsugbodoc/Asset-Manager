@@ -16,6 +16,7 @@ const checkoutSchema = z.object({
   billId: z.string().min(1),
   description: z.string().min(1).max(200),
   amount: z.number().finite().positive().max(1_000_000),
+  insuranceCoverageAmount: z.number().finite().min(0).optional().default(0),
   patientEmail: z.string().email().optional(),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
@@ -40,6 +41,7 @@ const medicationItemSchema = z.object({
 
 const medicationCheckoutSchema = z.object({
   cartItems: z.array(medicationItemSchema).min(1).max(50),
+  insuranceCoverageAmount: z.number().finite().min(0).optional().default(0),
   fulfillmentDetails: z.discriminatedUnion("mode", [
     z.object({
       mode: z.literal("delivery"),
@@ -83,8 +85,13 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
       return { ...medication, quantity: cartItem.quantity };
     });
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const insuranceCoverageAmount = Math.min(
+      subtotal,
+      Math.max(0, data.insuranceCoverageAmount),
+    );
+    const patientMedicationBalance = subtotal - insuranceCoverageAmount;
     const deliveryFee = data.fulfillmentDetails.mode === "delivery" ? 99 : 0;
-    const total = subtotal + deliveryFee;
+    const total = patientMedicationBalance + deliveryFee;
 
     // Stripe requires a minimum charge of ~$0.50 USD. At current PHP/USD rates
     // that is approximately ₱28. We enforce ₱50 to give a comfortable buffer.
@@ -102,14 +109,16 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
-        ...items.map((item) => ({
-          price_data: {
-            currency: "php",
-            product_data: { name: `${item.name} ${item.dosage} ${item.form}` },
-            unit_amount: Math.round(item.price * 100),
-          },
-          quantity: item.quantity,
-        })),
+        ...(patientMedicationBalance > 0
+          ? [{
+              price_data: {
+                currency: "php",
+                product_data: { name: "Medication balance after estimated insurance" },
+                unit_amount: Math.round(patientMedicationBalance * 100),
+              },
+              quantity: 1,
+            }]
+          : []),
         ...(deliveryFee > 0
           ? [{
               price_data: {
@@ -128,6 +137,8 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
         medicationOrderId: orderId,
         fulfillmentMode: data.fulfillmentDetails.mode,
         subtotal: subtotal.toFixed(2),
+        insuranceCoverageAmount: insuranceCoverageAmount.toFixed(2),
+        patientMedicationBalance: patientMedicationBalance.toFixed(2),
         deliveryFee: deliveryFee.toFixed(2),
         total: total.toFixed(2),
       },
@@ -174,7 +185,10 @@ router.post("/stripe/create-checkout-session", async (req, res) => {
       ],
       customer_email: data.patientEmail,
       client_reference_id: data.billId,
-      metadata: { billId: data.billId },
+       metadata: {
+         billId: data.billId,
+         insuranceCoverageAmount: data.insuranceCoverageAmount.toFixed(2),
+       },
       success_url: data.successUrl,
       cancel_url: data.cancelUrl,
     });

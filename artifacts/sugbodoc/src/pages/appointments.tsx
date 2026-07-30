@@ -3,6 +3,7 @@ import AppShell from '@/components/layout/app-shell';
 import { upcomingAppointments, pastAppointments, specialties, doctors } from '@/data/mock';
 import { Calendar as CalendarIcon, Clock, MapPin, User, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,12 +18,18 @@ type Appointment = {
   reference?: string;
   emailStatus?: EmailStatus;
   emailMessageId?: string;
+  billing?: {
+    originalAmount: number;
+    estimatedInsuranceCoverage: number;
+    patientBalance: number;
+  };
 };
 
 // ─── localStorage helpers ─────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'sugbodoc_appointments';
 const USER_KEY = 'sugbodoc_current_user';
+const MOCK_APPOINTMENT_FEE = 800;
 
 function loadAppointments(): Appointment[] {
   try {
@@ -74,6 +81,8 @@ export default function Appointments() {
   const [selectedTime, setSelectedTime] = useState('');
 
   const { toast } = useToast();
+  const insurance = loadInsurance();
+  const appointmentEstimate = calculateInsuranceEstimate(MOCK_APPOINTMENT_FEE, insurance, 'appointment');
 
   // Load persisted appointments on mount
   useEffect(() => {
@@ -127,6 +136,11 @@ export default function Appointments() {
       status: 'Pending',
       reference,
       emailStatus: 'pending',
+      billing: {
+        originalAmount: appointmentEstimate.originalAmount,
+        estimatedInsuranceCoverage: appointmentEstimate.estimatedCoverage,
+        patientBalance: appointmentEstimate.patientBalance,
+      },
     };
 
     // 1. Save to localStorage immediately so it persists regardless of email outcome
@@ -178,6 +192,16 @@ export default function Appointments() {
     );
     setLocalAppointments(finalAppointments);
     saveAppointments(finalAppointments);
+    createOrUpdateClaim({
+      relatedType: 'appointment',
+      relatedId: reference,
+      relatedLabel: `${selectedDoctor.name} · ${selectedDate}`,
+      originalAmount: appointmentEstimate.originalAmount,
+      estimatedCoverage: appointmentEstimate.estimatedCoverage,
+      patientBalance: appointmentEstimate.patientBalance,
+      status: 'Processing',
+      provider: insurance?.provider ?? 'Testing estimate',
+    });
 
     setIsConfirming(false);
     resetBooking();
@@ -281,6 +305,13 @@ export default function Appointments() {
                         </span>
                       </div>
                     </div>
+                    {apt.billing && (
+                      <div className="mt-3 rounded-lg border border-primary/10 bg-primary/5 px-3 py-2 text-xs">
+                        <span className="font-semibold text-primary">Insurance estimate:</span>{' '}
+                        ₱{apt.billing.estimatedInsuranceCoverage.toFixed(2)} covered ·{' '}
+                        <span className="font-bold">₱{apt.billing.patientBalance.toFixed(2)} patient balance</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -471,6 +502,20 @@ export default function Appointments() {
                         </div>
                       ) : null;
                     })()}
+                    <div className="rounded-xl border border-primary/15 bg-primary/5 p-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <p className="text-sm font-bold text-primary">Insurance estimate</p>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Testing only</span>
+                      </div>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Appointment fee</span><span className="font-medium">₱{appointmentEstimate.originalAmount.toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Estimated coverage</span><span className="font-medium text-emerald-600">−₱{appointmentEstimate.estimatedCoverage.toFixed(2)}</span></div>
+                        <div className="flex justify-between border-t border-primary/10 pt-1.5 font-bold"><span>Estimated patient balance</span><span className="text-primary">₱{appointmentEstimate.patientBalance.toFixed(2)}</span></div>
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        {insurance?.provider ? `${insurance.provider} · ${Math.round(appointmentEstimate.coveragePercent * 100)}% estimate` : 'Add an active plan in Profile to preview coverage.'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}

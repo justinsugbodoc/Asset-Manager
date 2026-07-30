@@ -1,0 +1,1 @@
+- [Medication checkout modal](medication-checkout-modal.md) — native React modal is preferred here because the existing Radix Dialog path triggered a runtime dispatcher issue.

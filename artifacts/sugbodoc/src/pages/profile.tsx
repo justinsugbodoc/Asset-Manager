@@ -1,8 +1,15 @@
 import { useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
-import { Bell, Globe, Moon, LogOut, Edit3, HeartPulse, Phone, UserRound } from 'lucide-react';
+import { Bell, Globe, Moon, LogOut, Edit3, HeartPulse, Phone, UserRound, ShieldCheck, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import {
+  getInsuranceStatus,
+  INSURANCE_PROVIDERS,
+  loadInsurance,
+  saveInsurance,
+  type InsuranceRecord,
+} from '@/lib/insurance';
 
 type StoredUser = {
   name: string;
@@ -30,6 +37,14 @@ export default function Profile() {
   const [user, setUser] = useState<StoredUser | null>(loadCurrentUser);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<StoredUser | null>(loadCurrentUser);
+  const [insurance, setInsurance] = useState<InsuranceRecord | null>(loadInsurance);
+  const [insuranceForm, setInsuranceForm] = useState<InsuranceRecord>(() => loadInsurance() ?? {
+    provider: '',
+    memberNumber: '',
+    plan: '',
+    coverageType: 'HMO',
+    expirationDate: '',
+  });
 
   // Toggles state
   const [toggles, setToggles] = useState({
@@ -94,6 +109,27 @@ export default function Profile() {
     toast({
       title: "Profile Updated",
       description: "Your personal information has been successfully saved.",
+    });
+  };
+
+  const handleSaveInsurance = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!insuranceForm.provider || !insuranceForm.memberNumber || !insuranceForm.plan || !insuranceForm.expirationDate) {
+      toast({
+        title: 'Complete your insurance details',
+        description: 'Provider, member number, plan, and expiration date are required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const updated = { ...insuranceForm, updatedAt: new Date().toISOString() };
+    saveInsurance(updated);
+    setInsurance(updated);
+    setInsuranceForm(updated);
+    toast({
+      title: 'Insurance details saved',
+      description: 'Coverage is labeled as an estimate for testing only.',
     });
   };
 
@@ -247,6 +283,93 @@ export default function Profile() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Insurance Section */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold">Insurance Coverage</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Add a dummy plan to preview estimated coverage across your care.
+                </p>
+              </div>
+            </div>
+            <span className={`w-fit rounded-full px-3 py-1 text-xs font-bold ${
+              getInsuranceStatus(insurance) === 'Active'
+                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'
+                : getInsuranceStatus(insurance) === 'Expired'
+                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400'
+                  : 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+            }`}>
+              {getInsuranceStatus(insurance)}
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveInsurance} className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Provider</label>
+              <select
+                value={insuranceForm.provider}
+                onChange={e => setInsuranceForm({ ...insuranceForm, provider: e.target.value })}
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="">Select provider</option>
+                {INSURANCE_PROVIDERS.map(provider => <option key={provider}>{provider}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Member number</label>
+              <input
+                value={insuranceForm.memberNumber}
+                onChange={e => setInsuranceForm({ ...insuranceForm, memberNumber: e.target.value })}
+                placeholder="e.g. HMO-123456"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Plan</label>
+              <input
+                value={insuranceForm.plan}
+                onChange={e => setInsuranceForm({ ...insuranceForm, plan: e.target.value })}
+                placeholder="e.g. Gold Care"
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Coverage type</label>
+              <select
+                value={insuranceForm.coverageType}
+                onChange={e => setInsuranceForm({ ...insuranceForm, coverageType: e.target.value })}
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20"
+              >
+                <option>HMO</option>
+                <option>Government</option>
+                <option>Private Health Plan</option>
+              </select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-muted-foreground">Expiration date</label>
+              <input
+                type="date"
+                value={insuranceForm.expirationDate}
+                onChange={e => setInsuranceForm({ ...insuranceForm, expirationDate: e.target.value })}
+                className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm focus:border-primary focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+            <div className="flex items-end">
+              <button type="submit" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground shadow-sm hover:bg-primary/90">
+                <Save className="h-4 w-4" /> Save insurance details
+              </button>
+            </div>
+          </form>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Prototype only: providers and eligibility results are dummy estimates. No real PhilHealth or HMO service is connected.
+          </p>
         </div>
 
         {/* Settings Sections */}

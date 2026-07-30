@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { upcomingAppointments, inbox, bills, activities } from '@/data/mock';
 import { Link, useLocation } from 'wouter';
-import { Calendar, MessageSquare, FileText, CreditCard, Clock, ChevronRight, Activity } from 'lucide-react';
+import { Calendar, MessageSquare, FileText, CreditCard, Clock, ChevronRight, Activity, ShieldCheck } from 'lucide-react';
 import { STORAGE_KEYS } from '@/hooks/use-auth';
+import { calculateInsuranceEstimate, getInsuranceStatus, loadInsurance } from '@/lib/insurance';
 
 type CurrentUser = {
   name?: string;
@@ -34,6 +35,9 @@ export default function Dashboard() {
   const nextAppointment = upcomingAppointments[0];
   const unreadMessages = inbox.filter(msg => msg.unread).length;
   const pendingAmount = bills.reduce((acc, bill) => acc + bill.amount, 0);
+  const insurance = loadInsurance();
+  const insuranceStatus = getInsuranceStatus(insurance);
+  const billCoverage = calculateInsuranceEstimate(pendingAmount, insurance, 'bill');
 
   const formatMoney = (amount: number) => {
     return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount);
@@ -125,16 +129,35 @@ export default function Dashboard() {
             <p className="text-lg font-bold text-foreground mt-0.5">{formatMoney(pendingAmount)}</p>
           </Link>
 
-          <Link href="/records" className="bg-card border border-border p-4 rounded-2xl shadow-sm hover:border-primary/50 transition-colors group block">
+          <Link href="/insurance-claims" className="bg-card border border-border p-4 rounded-2xl shadow-sm hover:border-primary/50 transition-colors group block">
             <div className="flex items-center justify-between mb-3">
               <div className="h-10 w-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center group-hover:scale-110 transition-transform">
-                <Activity className="h-5 w-5" />
+                <ShieldCheck className="h-5 w-5" />
               </div>
             </div>
-            <p className="text-sm text-muted-foreground font-medium">Active Rx</p>
-            <p className="text-lg font-bold text-foreground mt-0.5">2 Medications</p>
+            <p className="text-sm text-muted-foreground font-medium">Insurance</p>
+            <p className="text-lg font-bold text-foreground mt-0.5">{insurance?.provider || 'Add a plan'}</p>
+            <p className="mt-1 text-xs font-medium text-muted-foreground">{insuranceStatus} · estimates only</p>
           </Link>
         </div>
+
+        <Link href="/profile" className="flex flex-col gap-4 rounded-2xl border border-primary/15 bg-gradient-to-r from-primary/10 to-card p-5 shadow-sm transition-colors hover:border-primary/40 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-primary/10 p-2.5 text-primary"><ShieldCheck className="h-5 w-5" /></div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-primary">Insurance summary · testing estimate</p>
+              <p className="mt-1 font-bold text-foreground">
+                {insurance?.provider ? `${insurance.provider} · ${insurance.plan}` : 'Add your insurance details in Profile'}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {insuranceStatus === 'Active'
+                  ? `Estimated coverage on outstanding bills: ${formatMoney(billCoverage.estimatedCoverage)}`
+                  : 'Coverage estimates are unavailable until an active plan is saved.'}
+              </p>
+            </div>
+          </div>
+          <span className="text-sm font-bold text-primary">Manage plan <ChevronRight className="inline h-4 w-4" /></span>
+        </Link>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Upcoming Appointments List */}
