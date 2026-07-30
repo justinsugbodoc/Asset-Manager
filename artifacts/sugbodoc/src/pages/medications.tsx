@@ -155,15 +155,18 @@ export default function Medications() {
   const deliveryFee = fulfillmentMode === 'delivery' ? 99 : 0;
   const total = subtotal + deliveryFee;
 
+  const MINIMUM_ORDER_PHP = 50;
+
   const isCheckoutValid = useMemo(() => {
     if (cartItems.length === 0) return false;
+    if (total < MINIMUM_ORDER_PHP) return false;
     if (fulfillmentMode === 'delivery') {
       return deliveryForm.recipientName.trim() !== '' && 
              deliveryForm.phone.trim() !== '' && 
              deliveryForm.address.trim() !== '';
     }
     return !!pickupLocation;
-  }, [cartItems, fulfillmentMode, deliveryForm, pickupLocation]);
+  }, [cartItems, fulfillmentMode, deliveryForm, pickupLocation, total]);
 
   const addToCart = (med: any) => {
     setCartItems(current => {
@@ -519,7 +522,10 @@ export default function Medications() {
                   
                   {!isCheckoutValid && cartItems.length > 0 && (
                     <p className="text-xs text-center text-amber-600 dark:text-amber-400 mt-4 font-medium flex items-center justify-center gap-1">
-                      <AlertCircle className="h-3.5 w-3.5" /> Please complete fulfillment details
+                      <AlertCircle className="h-3.5 w-3.5" />
+                      {total < MINIMUM_ORDER_PHP
+                        ? `Minimum order is ₱${MINIMUM_ORDER_PHP.toFixed(2)}`
+                        : 'Please complete fulfillment details'}
                     </p>
                   )}
                 </div>

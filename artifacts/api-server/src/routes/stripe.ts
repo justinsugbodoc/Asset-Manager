@@ -85,6 +85,17 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const deliveryFee = data.fulfillmentDetails.mode === "delivery" ? 99 : 0;
     const total = subtotal + deliveryFee;
+
+    // Stripe requires a minimum charge of ~$0.50 USD. At current PHP/USD rates
+    // that is approximately ₱28. We enforce ₱50 to give a comfortable buffer.
+    const MINIMUM_ORDER_PHP = 50;
+    if (total < MINIMUM_ORDER_PHP) {
+      res.status(400).json({
+        error: `Minimum order amount is ₱${MINIMUM_ORDER_PHP.toFixed(2)}. Your total is ₱${total.toFixed(2)}.`,
+      });
+      return;
+    }
+
     const orderId = `med_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const stripe = getStripe();
 
