@@ -248,6 +248,20 @@ export default function Medications() {
     }
   };
 
+  const markOrderReceived = (reference: string) => {
+    setOrders(current =>
+      current.map(order =>
+        order.reference === reference
+          ? { ...order, status: 'Received', receivedAt: new Date().toISOString() }
+          : order,
+      ),
+    );
+    toast({
+      title: 'Order marked as received',
+      description: 'Thanks for confirming that your medication order arrived.',
+    });
+  };
+
   const sortedOrders = [...orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
   return (
@@ -260,21 +274,33 @@ export default function Medications() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex bg-muted/50 p-1.5 rounded-xl w-full max-w-sm mb-8 border border-border/50 shadow-sm">
-        <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'shop' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-          Shop
-        </button>
-        <button onClick={() => setActiveTab('cart')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${activeTab === 'cart' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-          Cart
+      {/* Pharmacy navigation — cart stays easy to reach on the right on every screen */}
+      <div className="mb-8 flex w-full items-center justify-between gap-3">
+        <div className="flex items-center gap-1 rounded-xl border border-border/50 bg-muted/50 p-1.5 shadow-sm">
+          <button onClick={() => setActiveTab('shop')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${activeTab === 'shop' ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+            Shop
+          </button>
+          <button onClick={() => setActiveTab('orders')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${activeTab === 'orders' ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+            Orders
+          </button>
+        </div>
+        <button
+          onClick={() => setActiveTab('cart')}
+          className={`flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold transition-all ${
+            activeTab === 'cart'
+              ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+              : 'border-border/50 bg-card text-foreground shadow-sm hover:border-primary/40 hover:text-primary'
+          }`}
+        >
+          <ShoppingBag className="h-4 w-4" />
+          <span>Cart</span>
           {cartItems.length > 0 && (
-            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${activeTab === 'cart' ? 'bg-primary text-white' : 'bg-primary/20 text-primary'}`}>
+            <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] ${
+              activeTab === 'cart' ? 'bg-primary-foreground text-primary' : 'bg-primary/15 text-primary'
+            }`}>
               {cartItems.length}
             </span>
           )}
-        </button>
-        <button onClick={() => setActiveTab('orders')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'orders' ? 'bg-background shadow-sm text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-          Orders
         </button>
       </div>
 
@@ -489,11 +515,23 @@ export default function Medications() {
                         {new Date(order.createdAt).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: 'numeric' })}
                       </p>
                     </div>
-                    <div className="text-left sm:text-right w-full sm:w-auto bg-primary/5 sm:bg-transparent p-3 sm:p-0 rounded-xl">
-                      <div className="font-bold text-xl text-primary">₱{order.totals.total.toFixed(2)}</div>
-                      <div className="text-xs font-medium text-muted-foreground flex items-center gap-1 sm:justify-end mt-1">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Paid securely
+                    <div className="flex w-full flex-col items-start gap-3 rounded-xl bg-primary/5 p-3 sm:w-auto sm:items-end sm:bg-transparent sm:p-0">
+                      <div className="text-left sm:text-right">
+                        <div className="font-bold text-xl text-primary">₱{order.totals.total.toFixed(2)}</div>
+                        <div className="mt-1 flex items-center gap-1 text-xs font-medium text-muted-foreground sm:justify-end">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Paid securely
+                        </div>
                       </div>
+                      {order.paymentStatus === 'paid' && order.status !== 'Received' && (
+                        <button
+                          type="button"
+                          onClick={() => markOrderReceived(order.reference)}
+                          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-emerald-700 active:scale-95"
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                          Received
+                        </button>
+                      )}
                     </div>
                   </div>
                   
