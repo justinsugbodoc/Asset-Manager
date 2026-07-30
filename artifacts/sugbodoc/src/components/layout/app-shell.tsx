@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Home, Calendar, FileText, MessageSquare, CreditCard, User, LogOut, Bell } from 'lucide-react';
+import { Home, Calendar, FileText, MessageSquare, CreditCard, User, LogOut, Bell, Pill } from 'lucide-react';
 import Logo from '@/components/brand/logo';
 
 type ShellProps = {
@@ -16,6 +16,7 @@ export default function AppShell({ children, title }: ShellProps) {
     { icon: Calendar, label: 'Appointments', path: '/appointments' },
     { icon: FileText, label: 'Records', path: '/records' },
     { icon: MessageSquare, label: 'Messages', path: '/messages' },
+    { icon: Pill, label: 'Medications', path: '/medications' },
     { icon: CreditCard, label: 'Billing', path: '/billing' },
     { icon: User, label: 'Profile', path: '/profile' }
   ];
@@ -73,9 +74,8 @@ export default function AppShell({ children, title }: ShellProps) {
       {/* Mobile Bottom Tab Bar */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 h-[68px] bg-card border-t border-border flex items-center justify-around px-1 z-50 pb-safe">
         {navItems.map((item) => {
-          // Keep it to 5 core icons on mobile for space, omit Billing and push to Profile/Menu, or keep 5 main ones.
-          // Let's hide Billing in bottom nav to have 5 icons as per typical mobile guidelines, or show 5 specific ones: Home, Appointments, Records, Messages, Profile.
-          if (item.path === '/billing') return null;
+          // Keep the mobile bar focused on the most-used patient actions.
+          if (item.path === '/billing' || item.path === '/medications') return null;
 
           const isActive = location === item.path || (item.path !== '/' && location.startsWith(item.path));
           return (

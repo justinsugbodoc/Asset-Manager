@@ -10,6 +10,7 @@ import Appointments from '@/pages/appointments';
 import Records from '@/pages/records';
 import Messages from '@/pages/messages';
 import Billing from '@/pages/billing';
+import Medications from '@/pages/medications';
 import Profile from '@/pages/profile';
 import NotFound from '@/pages/not-found';
 
@@ -47,6 +48,9 @@ export function AppRoutes() {
       </Route>
       <Route path="/billing">
         {() => <ProtectedRoute component={Billing} />}
+      </Route>
+      <Route path="/medications">
+        {() => <ProtectedRoute component={Medications} />}
       </Route>
       <Route path="/profile">
         {() => <ProtectedRoute component={Profile} />}
