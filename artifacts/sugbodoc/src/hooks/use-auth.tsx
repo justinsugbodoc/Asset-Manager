@@ -20,6 +20,7 @@ export type SessionUser = {
   bloodType?: string;
   role?: UserRole;
   status?: 'Active' | 'Inactive';
+  clinicalEditingPermission?: boolean;
 };
 
 export function getCurrentSessionUser(): SessionUser | null {
@@ -46,6 +47,7 @@ export function ensureDemoAdmin() {
       bloodType: '',
       role: 'Admin',
       status: 'Active',
+      clinicalEditingPermission: false,
     });
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
   } catch {

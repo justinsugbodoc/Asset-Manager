@@ -11,7 +11,12 @@ import {
   createOrUpdateClaim,
   loadInsurance,
 } from '@/lib/insurance';
-import { loadAdminMedications, type AdminMedication } from '@/lib/admin';
+import {
+  LEGACY_MEDICATION_ORDER_STORAGE_KEY,
+  PHARMACY_ORDER_STORAGE_KEY,
+  loadAdminMedications,
+  type AdminMedication,
+} from '@/lib/admin';
 
 // Dummy catalog data
 const LEGACY_MEDICATIONS_CATALOG = [
@@ -26,7 +31,7 @@ const LEGACY_MEDICATIONS_CATALOG = [
   { id: 'med-009', name: 'Losartan', genericName: 'Losartan Potassium', category: 'Heart Health', form: 'Tablet', dosage: '50mg', price: 18.00, stock: 65, partnerLocations: ['Chong Hua Hospital Pharmacy'] },
 ];
 
-const CATEGORIES = ['All', 'Pain Relief', 'Cold & Flu', 'Cough', 'Digestion', 'Vitamins', 'Heart Health', 'Antibiotics'];
+const CATEGORIES = ['All', 'Pain Relief', 'Cold & Flu', 'Cough', 'Digestion', 'Vitamins', 'Heart Health', 'Antibiotics', 'Syringes', 'Wound Care', 'Protective Equipment', 'First Aid'];
 
 const PARTNER_LOCATIONS = [
   'Sugbo Pharmacy Escario',
@@ -51,7 +56,10 @@ export default function Medications() {
   const [categoryFilter, setCategoryFilter] = useState('All');
   
   const [cartItems, setCartItems] = useState<any[]>(() => safeJSONParse(localStorage.getItem('sugbodoc_medication_cart'), []));
-  const [orders, setOrders] = useState<any[]>(() => safeJSONParse(localStorage.getItem('sugbodoc_medication_orders'), []));
+  const [orders, setOrders] = useState<any[]>(() => safeJSONParse(
+    localStorage.getItem(PHARMACY_ORDER_STORAGE_KEY) ?? localStorage.getItem(LEGACY_MEDICATION_ORDER_STORAGE_KEY),
+    [],
+  ));
   
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(false);
@@ -78,7 +86,8 @@ export default function Medications() {
   }, [cartItems]);
 
   useEffect(() => {
-    localStorage.setItem('sugbodoc_medication_orders', JSON.stringify(orders));
+    localStorage.setItem(PHARMACY_ORDER_STORAGE_KEY, JSON.stringify(orders));
+    localStorage.setItem(LEGACY_MEDICATION_ORDER_STORAGE_KEY, JSON.stringify(orders));
   }, [orders]);
 
   useEffect(() => {
@@ -111,8 +120,8 @@ export default function Medications() {
             throw new Error(result.error ?? 'Payment has not been confirmed');
           }
 
-          if (result.orderType !== 'medication' || !result.medicationOrderId) {
-            throw new Error('This payment session is not a medication order.');
+          if ((result.orderType !== 'pharmacy' && result.orderType !== 'medication') || !result.medicationOrderId) {
+            throw new Error('This payment session is not a pharmacy order.');
           }
 
           const draft = safeJSONParse<{
@@ -151,7 +160,7 @@ export default function Medications() {
           createOrUpdateClaim({
             relatedType: 'medication',
             relatedId: result.medicationOrderId,
-            relatedLabel: `Medication order ${result.medicationOrderId}`,
+            relatedLabel: `Pharmacy order ${result.medicationOrderId}`,
             originalAmount: draft.totals.subtotal,
             estimatedCoverage: draft.totals.estimatedInsuranceCoverage ?? 0,
             patientBalance: draft.totals.patientMedicationBalance ?? draft.totals.total - draft.totals.deliveryFee,
@@ -160,7 +169,7 @@ export default function Medications() {
           });
           localStorage.removeItem('sugbodoc_medication_checkout_draft');
           setActiveTab('orders');
-          toast({ title: 'Order Successful', description: 'Your medication order has been placed and is now pending fulfillment.' });
+          toast({ title: 'Pharmacy order successful', description: 'Your pharmacy order has been placed and is now pending fulfillment.' });
           
         } catch (err) {
           toast({ title: 'Order Verification Failed', description: err instanceof Error ? err.message : 'Please check your orders tab or contact support.', variant: 'destructive' });
@@ -298,7 +307,7 @@ export default function Medications() {
     );
     toast({
       title: 'Order marked as received',
-      description: 'Thanks for confirming that your medication order arrived.',
+      description: 'Thanks for confirming that your pharmacy order arrived.',
     });
   };
 
@@ -321,7 +330,7 @@ export default function Medications() {
             Shop
           </button>
           <button onClick={() => setActiveTab('orders')} className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${activeTab === 'orders' ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-            Orders
+            Pharmacy Orders
           </button>
         </div>
         <button
@@ -399,11 +408,12 @@ export default function Medications() {
                   </div>
                   
                   <h3 className="font-bold text-foreground leading-tight text-lg">{med.name}</h3>
-                  <p className="text-xs text-muted-foreground mt-1 mb-3 line-clamp-1">{med.genericName}</p>
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{med.genericName}</p>
+                  <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground/90">{med.description}</p>
                   
                   <div className="mt-auto pt-4 flex items-end justify-between border-t border-border/50">
                     <div>
-                      <div className="text-xs font-medium text-muted-foreground mb-1">{med.dosage} • {med.form}</div>
+                      <div className="text-xs font-medium text-muted-foreground mb-1">{med.category} · {med.dosage} • {med.form}</div>
                       <div className="font-bold text-xl text-foreground">₱{med.price.toFixed(2)}</div>
                     </div>
                     <button 
@@ -447,7 +457,7 @@ export default function Medications() {
                 {/* Cart List */}
                 <div className="bg-card border border-border rounded-2xl p-4 md:p-6 shadow-sm">
                   <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                    <ShoppingBag className="h-5 w-5 text-primary" /> Order Items
+                    <ShoppingBag className="h-5 w-5 text-primary" /> Pharmacy Order Items
                   </h3>
                   <div className="space-y-4">
                     {cartItems.map(item => (
@@ -487,7 +497,7 @@ export default function Medications() {
                   <h3 className="font-bold text-lg mb-5">Order Summary</h3>
                   <div className="space-y-3 text-sm mb-6">
                     <div className="flex justify-between text-muted-foreground font-medium">
-                      <span>Original medicine amount ({cartItems.length} items)</span>
+                      <span>Original item amount ({cartItems.length} items)</span>
                       <span className="text-foreground">₱{subtotal.toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between text-muted-foreground font-medium">
@@ -543,8 +553,8 @@ export default function Medications() {
               <div className="bg-primary/5 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-5">
                 <Clock className="h-10 w-10 text-primary/40" />
               </div>
-              <h3 className="text-xl font-bold mb-2">No past orders</h3>
-              <p className="text-muted-foreground mb-8 max-w-sm mx-auto text-sm">You haven't placed any medication orders yet. Your order history will appear here.</p>
+              <h3 className="text-xl font-bold mb-2">No pharmacy orders</h3>
+              <p className="text-muted-foreground mb-8 max-w-sm mx-auto text-sm">You haven't placed any pharmacy orders yet. Your order history will appear here.</p>
               <button onClick={() => setActiveTab('shop')} className="bg-primary text-primary-foreground px-8 py-3 rounded-xl font-bold hover:bg-primary/90 transition-colors shadow-md hover:shadow-lg active:scale-95">
                 Start an Order
               </button>
@@ -556,7 +566,7 @@ export default function Medications() {
                   <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-5 pb-5 border-b border-border/50">
                     <div>
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className="font-bold text-foreground">Order #{order.reference.slice(-8).toUpperCase()}</span>
+                        <span className="font-bold text-foreground">Pharmacy Order #{order.reference.slice(-8).toUpperCase()}</span>
                         <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${order.status === 'Pending' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400'}`}>
                           {order.status}
                         </span>

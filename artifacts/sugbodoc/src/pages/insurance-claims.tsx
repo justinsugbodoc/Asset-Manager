@@ -48,7 +48,7 @@ export default function InsuranceClaims() {
               <div>
                 <h2 className="text-xl font-bold">Coverage claims</h2>
                 <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-                  Track testing-only estimates submitted for appointments, bills, and medication orders.
+                  Track testing-only estimates submitted for appointments, bills, and pharmacy orders.
                 </p>
               </div>
             </div>
@@ -71,7 +71,7 @@ export default function InsuranceClaims() {
             <FileCheck2 className="mx-auto h-12 w-12 text-primary/30" />
             <h3 className="mt-4 text-lg font-bold">No claims yet</h3>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-              Insurance claims will appear here after you book an appointment, pay a bill, or start a covered medication order.
+              Insurance claims will appear here after you book an appointment, pay a bill, or start a covered pharmacy order.
             </p>
           </div>
         ) : (

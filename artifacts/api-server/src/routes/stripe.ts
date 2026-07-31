@@ -32,6 +32,12 @@ const medicationCatalog = [
   { id: "med-007", name: "Kremil-S", dosage: "178mg/233mg/30mg", form: "Tablet", price: 11.5, stock: 95 },
   { id: "med-008", name: "Ascorbic Acid", dosage: "500mg", form: "Tablet", price: 5, stock: 500 },
   { id: "med-009", name: "Losartan", dosage: "50mg", form: "Tablet", price: 18, stock: 65 },
+  { id: "sup-001", name: "Disposable Syringes", dosage: "5mL", form: "Supply", price: 12, stock: 240 },
+  { id: "sup-002", name: "Sterile Gauze Pads", dosage: "4x4 in", form: "Supply", price: 35, stock: 90 },
+  { id: "sup-003", name: "Nitrile Examination Gloves", dosage: "Medium, 100 pcs", form: "Box", price: 320, stock: 45 },
+  { id: "sup-004", name: "Surgical Face Masks", dosage: "50 pcs", form: "Box", price: 180, stock: 75 },
+  { id: "sup-005", name: "70% Isopropyl Alcohol", dosage: "500mL", form: "Bottle", price: 95, stock: 65 },
+  { id: "sup-006", name: "Adhesive Bandages", dosage: "25 pcs", form: "Box", price: 85, stock: 110 },
 ] as const;
 
 const medicationItemSchema = z.object({
@@ -113,7 +119,7 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
           ? [{
               price_data: {
                 currency: "php",
-                product_data: { name: "Medication balance after estimated insurance" },
+                product_data: { name: "Pharmacy balance after estimated insurance" },
                 unit_amount: Math.round(patientMedicationBalance * 100),
               },
               quantity: 1,
@@ -123,7 +129,7 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
           ? [{
               price_data: {
                 currency: "php",
-                product_data: { name: "Medication delivery fee" },
+                product_data: { name: "Pharmacy delivery fee" },
                 unit_amount: deliveryFee * 100,
               },
               quantity: 1,
@@ -133,7 +139,7 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
       customer_email: data.patientEmail,
       client_reference_id: orderId,
       metadata: {
-        orderType: "medication",
+        orderType: "pharmacy",
         medicationOrderId: orderId,
         fulfillmentMode: data.fulfillmentDetails.mode,
         subtotal: subtotal.toFixed(2),

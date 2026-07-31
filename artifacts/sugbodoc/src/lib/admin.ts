@@ -13,15 +13,20 @@ import {
 } from '@/data/mock';
 import { getCurrentSessionUser, STORAGE_KEYS, type SessionUser } from '@/hooks/use-auth';
 import { loadClaims, loadInsurance, type InsuranceClaim, type InsuranceRecord } from '@/lib/insurance';
+import { getImagingRecords, getSoapNotes, type ImagingRecord } from '@/lib/clinical';
 
 export const ADMIN_STORAGE_KEYS = {
   patients: 'sugbodoc_admin_patients',
   medications: 'sugbodoc_admin_medications',
-  orders: 'sugbodoc_admin_orders',
+  orders: 'sugbodoc_admin_pharmacy_orders',
   payments: 'sugbodoc_admin_payments',
   schedules: 'sugbodoc_admin_schedules',
   audit: 'sugbodoc_admin_audit',
 } as const;
+
+export const PHARMACY_ORDER_STORAGE_KEY = 'sugbodoc_pharmacy_orders';
+export const LEGACY_MEDICATION_ORDER_STORAGE_KEY = 'sugbodoc_medication_orders';
+const LEGACY_ADMIN_ORDER_STORAGE_KEY = 'sugbodoc_admin_orders';
 
 export type AdminPatient = SessionUser & {
   id: string;
@@ -31,12 +36,13 @@ export type AdminPatient = SessionUser & {
     appointments: any[];
     encounters: any[];
     soapNotes: any[];
+    imaging: ImagingRecord[];
     diagnoses: any[];
     prescriptions: any[];
     labResults: any[];
     bills: any[];
     payments: AdminPayment[];
-    medicationOrders: any[];
+    pharmacyOrders: any[];
     insurance: InsuranceRecord | null;
     claims: InsuranceClaim[];
   };
@@ -114,6 +120,12 @@ const DEFAULT_MEDICATIONS: AdminMedication[] = [
   ['med-007', 'Kremil-S', 'Antacid for heartburn and indigestion.', 'Aluminum Hydroxide + Magnesium Hydroxide + Simeticone', '178mg/233mg/30mg', 'Tablet', 'Digestion', 11.5, 95],
   ['med-008', 'Ascorbic Acid', 'Vitamin C supplement.', 'Vitamin C', '500mg', 'Tablet', 'Vitamins', 5, 500],
   ['med-009', 'Losartan', 'Maintenance medicine for blood pressure.', 'Losartan Potassium', '50mg', 'Tablet', 'Heart Health', 18, 65],
+  ['sup-001', 'Disposable Syringes', 'Sterile single-use syringes for home care and clinical use.', 'Medical supply', '5mL', 'Supply', 'Syringes', 12, 240],
+  ['sup-002', 'Sterile Gauze Pads', 'Soft sterile gauze pads for wound cleaning and dressing.', 'Medical supply', '4x4 in', 'Supply', 'Wound Care', 35, 90],
+  ['sup-003', 'Nitrile Examination Gloves', 'Powder-free disposable gloves for hygiene and protection.', 'Medical supply', 'Medium, 100 pcs', 'Box', 'Protective Equipment', 320, 45],
+  ['sup-004', 'Surgical Face Masks', 'Disposable 3-ply masks with ear loops.', 'Medical supply', '50 pcs', 'Box', 'Protective Equipment', 180, 75],
+  ['sup-005', '70% Isopropyl Alcohol', 'Antiseptic alcohol for skin and surface preparation.', 'Medical supply', '500mL', 'Bottle', 'First Aid', 95, 65],
+  ['sup-006', 'Adhesive Bandages', 'Flexible adhesive strips for minor cuts and abrasions.', 'Medical supply', '25 pcs', 'Box', 'Wound Care', 85, 110],
 ].map(([id, name, description, genericName, dosage, dosageForm, category, price, stock]) => ({
   id: id as string,
   name: name as string,
@@ -150,7 +162,26 @@ function users(): Array<SessionUser & { password?: string }> {
 
 function seedPatients(): AdminPatient[] {
   const saved = read<AdminPatient[]>(ADMIN_STORAGE_KEYS.patients, []);
-  if (saved.length) return saved;
+  if (saved.length) {
+    const normalized = saved.map(patient => ({
+      ...patient,
+      clinical: {
+        ...patient.clinical,
+        soapNotes: patient.clinical.soapNotes?.map((note: any, index: number) => ({
+          ...note,
+          consultationReference: note.consultationReference ?? `CONS-2024-${String(index + 1).padStart(4, '0')}`,
+          status: note.status ?? 'Signed',
+        })) ?? getSoapNotes(),
+        imaging: patient.clinical.imaging?.length ? patient.clinical.imaging : getImagingRecords().map(record => ({ ...record, patientId: patient.id, patientName: patient.name })),
+        pharmacyOrders: patient.clinical.pharmacyOrders ?? (patient.clinical as any).medicationOrders ?? read<AdminOrder[]>(
+          PHARMACY_ORDER_STORAGE_KEY,
+          read<AdminOrder[]>(LEGACY_MEDICATION_ORDER_STORAGE_KEY, []),
+        ),
+      },
+    }));
+    write(ADMIN_STORAGE_KEYS.patients, normalized);
+    return normalized;
+  }
   const patientUsers = users().filter(user => (user.role ?? 'Patient') !== 'Admin');
   if (!patientUsers.length) {
     patientUsers.push({
@@ -176,13 +207,17 @@ function seedPatients(): AdminPatient[] {
       clinical: {
         appointments: [...upcomingAppointments, ...pastAppointments],
         encounters,
-        soapNotes,
+        soapNotes: getSoapNotes(),
+        imaging: getImagingRecords(),
         diagnoses,
         prescriptions,
         labResults,
         bills: [...bills, ...pastBills],
         payments: [],
-        medicationOrders: read<AdminOrder[]>('sugbodoc_medication_orders', []),
+        pharmacyOrders: read<AdminOrder[]>(
+          PHARMACY_ORDER_STORAGE_KEY,
+          read<AdminOrder[]>(LEGACY_MEDICATION_ORDER_STORAGE_KEY, []),
+        ),
         insurance: loadInsurance(),
         claims: loadClaims(),
       },
@@ -210,7 +245,15 @@ export function saveAdminPatients(patients: AdminPatient[]) {
 
 export function loadAdminMedications() {
   const saved = read<AdminMedication[]>(ADMIN_STORAGE_KEYS.medications, []);
-  if (saved.length) return saved;
+  if (saved.length) {
+    const missingSupplies = DEFAULT_MEDICATIONS.filter(item => !saved.some(existing => existing.id === item.id));
+    if (missingSupplies.length) {
+      const merged = [...saved, ...missingSupplies];
+      write(ADMIN_STORAGE_KEYS.medications, merged);
+      return merged;
+    }
+    return saved;
+  }
   write(ADMIN_STORAGE_KEYS.medications, DEFAULT_MEDICATIONS);
   return DEFAULT_MEDICATIONS;
 }
@@ -222,7 +265,13 @@ export function saveAdminMedications(items: AdminMedication[]) {
 export function loadAdminOrders() {
   const saved = read<AdminOrder[]>(ADMIN_STORAGE_KEYS.orders, []);
   if (saved.length) return saved;
-  const current = read<any[]>('sugbodoc_medication_orders', []);
+  const current = read<any[]>(
+    PHARMACY_ORDER_STORAGE_KEY,
+    read<any[]>(
+      LEGACY_ADMIN_ORDER_STORAGE_KEY,
+      read<any[]>(LEGACY_MEDICATION_ORDER_STORAGE_KEY, []),
+    ),
+  );
   const patients = seedPatients();
   const orders = current.map(order => ({
     ...order,
@@ -230,12 +279,15 @@ export function loadAdminOrders() {
     patientName: patients[0]?.name ?? currentPatient.name,
   })) as AdminOrder[];
   write(ADMIN_STORAGE_KEYS.orders, orders);
+  write(PHARMACY_ORDER_STORAGE_KEY, orders);
+  write(LEGACY_MEDICATION_ORDER_STORAGE_KEY, orders);
   return orders;
 }
 
 export function saveAdminOrders(orders: AdminOrder[]) {
   write(ADMIN_STORAGE_KEYS.orders, orders);
-  write('sugbodoc_medication_orders', orders);
+  write(PHARMACY_ORDER_STORAGE_KEY, orders);
+  write(LEGACY_MEDICATION_ORDER_STORAGE_KEY, orders);
 }
 
 export function loadAdminPayments() {

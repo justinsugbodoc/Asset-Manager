@@ -1,12 +1,16 @@
 import { useState, useEffect } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { recordsTabs, encounters, vitalsData, prescriptions, labResults, soapNotes, diagnoses } from '@/data/mock';
-import { FileText, Activity, Pill, FlaskConical, Stethoscope, AlertCircle, TrendingUp } from 'lucide-react';
+import { recordsTabs, encounters, vitalsData, prescriptions, labResults, diagnoses } from '@/data/mock';
+import { getImagingRecords, getSoapNotes, downloadImagingReport, type ImagingRecord } from '@/lib/clinical';
+import { FileText, Activity, Pill, FlaskConical, Stethoscope, AlertCircle, TrendingUp, Download, Image as ImageIcon, X, Maximize2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export default function Records() {
   const [activeTab, setActiveTab] = useState(recordsTabs[0]);
   const [loading, setLoading] = useState(true);
+  const [selectedImage, setSelectedImage] = useState<ImagingRecord | null>(null);
+  const soapNotes = getSoapNotes();
+  const imaging = getImagingRecords();
 
   useEffect(() => {
     setLoading(true);
@@ -150,41 +154,62 @@ export default function Records() {
 
           {/* LAB RESULTS */}
           {activeTab === 'Lab Results' && (
-            <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
-              <div className="p-4 sm:p-5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-2">
-                  <FlaskConical className="h-5 w-5 text-primary" />
-                  <h3 className="font-bold text-lg text-foreground">Recent Test Results</h3>
+            <div className="space-y-6">
+              <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+                <div className="p-4 sm:p-5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <FlaskConical className="h-5 w-5 text-primary" />
+                    <h3 className="font-bold text-lg text-foreground">Recent Lab Results</h3>
+                  </div>
+                  <span className="text-sm text-muted-foreground">From Jun 05, 2024</span>
                 </div>
-                <span className="text-sm text-muted-foreground">From Jun 05, 2024</span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs uppercase bg-muted/30 text-muted-foreground border-b border-border">
-                    <tr>
-                      <th className="px-6 py-4 font-semibold">Test Name</th>
-                      <th className="px-6 py-4 font-semibold">Result</th>
-                      <th className="px-6 py-4 font-semibold">Reference Range</th>
-                      <th className="px-6 py-4 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {labResults.map(lab => (
-                      <tr key={lab.id} className="hover:bg-muted/30 transition-colors">
-                        <td className="px-6 py-4 font-medium text-foreground">{lab.test}</td>
-                        <td className={`px-6 py-4 font-bold ${lab.status === 'Abnormal' ? 'text-destructive' : 'text-foreground'}`}>
-                          {lab.result}
-                        </td>
-                        <td className="px-6 py-4 text-muted-foreground">{lab.range}</td>
-                        <td className="px-6 py-4">
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
-                            {lab.status}
-                          </span>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm text-left">
+                    <thead className="text-xs uppercase bg-muted/30 text-muted-foreground border-b border-border">
+                      <tr>
+                        <th className="px-6 py-4 font-semibold">Test Name</th>
+                        <th className="px-6 py-4 font-semibold">Result</th>
+                        <th className="px-6 py-4 font-semibold">Reference Range</th>
+                        <th className="px-6 py-4 font-semibold">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {labResults.map(lab => (
+                        <tr key={lab.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-6 py-4 font-medium text-foreground">{lab.test}</td>
+                          <td className={`px-6 py-4 font-bold ${lab.status === 'Abnormal' ? 'text-destructive' : 'text-foreground'}`}>
+                            {lab.result}
+                          </td>
+                          <td className="px-6 py-4 text-muted-foreground">{lab.range}</td>
+                          <td className="px-6 py-4">
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${lab.status === 'Normal' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-destructive/10 text-destructive'}`}>
+                              {lab.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2"><ImageIcon className="h-5 w-5 text-primary" /><h3 className="font-bold text-lg">Imaging</h3></div>
+                  <span className="text-xs text-muted-foreground">Dummy prototype records</span>
+                </div>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  {imaging.map(record => (
+                    <div key={record.id} className="rounded-xl border border-border p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div><p className="font-bold">{record.type} · {record.bodyArea}</p><p className="text-xs text-muted-foreground">{record.date} · {record.doctor}</p></div>
+                        <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-800">{record.status}</span>
+                      </div>
+                      {record.imageUrl && <button type="button" onClick={() => setSelectedImage(record)} className="group relative mt-4 block w-full overflow-hidden rounded-lg border border-border bg-slate-900"><img src={record.imageUrl} alt={`${record.type} preview`} className="h-36 w-full object-cover transition group-hover:scale-[1.02]" /><span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-black/70 px-2 py-1 text-xs font-semibold text-white"><Maximize2 className="h-3 w-3" /> Open image</span></button>}
+                      <div className="mt-4 space-y-2 text-sm"><p><strong>Findings:</strong> {record.findings}</p><p><strong>Impression:</strong> {record.impression}</p></div>
+                      <button type="button" onClick={() => downloadImagingReport(record)} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold text-primary hover:bg-muted"><Download className="h-3.5 w-3.5" /> Download mock report</button>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}
@@ -199,7 +224,7 @@ export default function Records() {
                       <Stethoscope className="h-5 w-5 text-primary" />
                       <h3 className="font-bold text-lg text-foreground">{note.doctor}</h3>
                     </div>
-                    <span className="text-sm font-medium text-muted-foreground">{note.date}</span>
+                    <div className="text-right text-xs text-muted-foreground"><p>{note.date} · {note.status}</p><p>{note.consultationReference}</p></div>
                   </div>
                   
                   <div className="space-y-4 text-sm">
@@ -250,6 +275,15 @@ export default function Records() {
             </div>
           )}
 
+        </div>
+      )}
+      {selectedImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="Imaging preview">
+          <div className="relative max-h-[95vh] max-w-5xl overflow-auto rounded-2xl bg-card p-3 shadow-2xl">
+            <button type="button" onClick={() => setSelectedImage(null)} className="absolute right-5 top-5 z-10 rounded-full bg-black/70 p-2 text-white hover:bg-black"><X className="h-5 w-5" /></button>
+            <img src={selectedImage.imageUrl} alt={`${selectedImage.type} enlarged preview`} className="max-h-[82vh] w-full rounded-xl object-contain" />
+            <div className="px-2 pt-3 text-sm"><p className="font-bold">{selectedImage.type} · {selectedImage.bodyArea}</p><p className="text-xs text-muted-foreground">{selectedImage.date} · {selectedImage.doctor}</p></div>
+          </div>
         </div>
       )}
     </AppShell>
