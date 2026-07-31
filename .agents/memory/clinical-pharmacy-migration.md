@@ -14,3 +14,9 @@ Completed appointments are the source of truth for encounter creation: use appoi
 **Why:** The prototype must preserve older mock records while ensuring new clinical, pharmacy, and billing data can be traced back to one completed consultation without introducing a backend migration.
 
 **How to apply:** Create encounters only from Confirmed → Completed transitions, expose encounter selectors in clinical views, and keep patient data read-only unless the session is an authorized clinical user.
+
+For Gmail SMTP, use `smtp.gmail.com` as the host; `smtp@gmail.com` is an email address-like value and causes DNS `ENOTFOUND` failures.
+
+**Why:** Appointment confirmation emails failed at DNS resolution before authentication could run.
+
+**How to apply:** Keep Gmail on port 587 with secure mode false and use a Gmail app password when account security requires it.
