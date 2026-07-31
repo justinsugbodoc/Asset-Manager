@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
-import { Bell, Globe, Moon, LogOut, Edit3, HeartPulse, Phone, UserRound, ShieldCheck, Save } from 'lucide-react';
+import { STORAGE_KEYS } from '@/hooks/use-auth';
+import { Bell, Globe, Moon, Edit3, HeartPulse, Phone, UserRound, ShieldCheck, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
   getInsuranceStatus,
@@ -32,7 +32,6 @@ function loadCurrentUser(): StoredUser | null {
 }
 
 export default function Profile() {
-  const { logout } = useAuth();
   const { toast } = useToast();
   const [user, setUser] = useState<StoredUser | null>(loadCurrentUser);
   const [isEditing, setIsEditing] = useState(false);
@@ -442,15 +441,6 @@ export default function Profile() {
               </div>
             </div>
 
-            <div className="pt-6 mt-6 border-t border-border">
-              <button 
-                onClick={logout}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-destructive/10 text-destructive font-bold hover:bg-destructive/20 transition-colors"
-              >
-                <LogOut className="h-5 w-5" />
-                Sign Out
-              </button>
-            </div>
           </div>
 
         </div>
