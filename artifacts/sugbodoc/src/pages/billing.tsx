@@ -4,10 +4,14 @@ import { bills as mockBills, pastBills } from '@/data/mock';
 import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
+import { getCurrentSessionUser } from '@/hooks/use-auth';
+import { getLatestPatientEncounter, linkBillingRecordToEncounter } from '@/lib/encounters';
 
 export default function Billing() {
-  const [bills, setBills] = useState(mockBills);
-  const [history, setHistory] = useState(pastBills);
+  const currentUser = getCurrentSessionUser();
+  const activeEncounter = getLatestPatientEncounter(currentUser?.id, currentUser?.name);
+  const [bills, setBills] = useState(() => mockBills.map(bill => ({ ...bill, encounterId: activeEncounter?.id, encounterReference: activeEncounter?.encounterReference })));
+  const [history, setHistory] = useState(() => pastBills.map(bill => ({ ...bill, encounterId: activeEncounter?.id, encounterReference: activeEncounter?.encounterReference })));
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -57,6 +61,8 @@ export default function Billing() {
           setHistory((current) => [
             ...billsToMarkPaid.map((bill) => ({
               ...bill,
+              encounterId: bill.encounterId ?? activeEncounter?.id,
+              encounterReference: bill.encounterReference ?? activeEncounter?.encounterReference,
               status: 'Paid',
               receiptId: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
               originalAmount: billsToMarkPaid.length === 1 ? paidOriginalAmount : bill.amount,
@@ -69,6 +75,18 @@ export default function Billing() {
             })),
             ...current,
           ]);
+          billsToMarkPaid.forEach(bill => linkBillingRecordToEncounter(
+            bill,
+            {
+              id: `${bill.id}_payment`,
+              amount: bill.amount,
+              status: 'Paid',
+              reference: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
+              date: new Date().toISOString().slice(0, 10),
+            },
+            currentUser?.id,
+            currentUser?.name,
+          ));
           createOrUpdateClaim({
             relatedType: 'bill',
             relatedId: result.billId,
@@ -122,9 +140,6 @@ export default function Billing() {
       const originalAmount = billsToPay.reduce((sum, bill) => sum + bill.amount, 0);
       const estimate = calculateInsuranceEstimate(originalAmount, insurance, 'bill');
       const total = estimate.patientBalance;
-      const currentUser = JSON.parse(localStorage.getItem('sugbodoc_current_user') ?? 'null') as
-        | { email?: string }
-        | null;
       const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
       const appBase = `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`;
       const response = await fetch(`${base}/api/stripe/create-checkout-session`, {
@@ -201,7 +216,7 @@ export default function Billing() {
       <div className="grid lg:grid-cols-2 gap-8">
         
         {/* Outstanding Bills */}
-        <div>
+          <div>
           <h3 className="text-lg font-bold mb-4">Pending Bills</h3>
           <div className="space-y-3">
             {bills.length > 0 ? (
@@ -252,6 +267,7 @@ export default function Billing() {
                     <h4 className="font-medium text-foreground">{item.description}</h4>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-sm text-muted-foreground">{item.date}</span>
+                      {(item as any).encounterReference && <span className="text-[10px] font-mono text-primary">{(item as any).encounterReference}</span>}
                       <span className="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">Paid</span>
                     </div>
                   </div>

@@ -17,6 +17,7 @@ import {
   loadAdminMedications,
   type AdminMedication,
 } from '@/lib/admin';
+import { attachPharmacyOrderToEncounter, getLatestPatientEncounter } from '@/lib/encounters';
 
 // Dummy catalog data
 const LEGACY_MEDICATIONS_CATALOG = [
@@ -49,7 +50,7 @@ function safeJSONParse<T>(str: string | null, fallback: T): T {
 
 export default function Medications() {
   const { toast } = useToast();
-  const currentUser = useMemo(() => safeJSONParse<{ email?: string; name?: string; phone?: string } | null>(localStorage.getItem('sugbodoc_current_user'), null), []);
+  const currentUser = useMemo(() => safeJSONParse<{ id?: string; email?: string; name?: string; phone?: string } | null>(localStorage.getItem('sugbodoc_current_user'), null), []);
 
   const [activeTab, setActiveTab] = useState<'shop' | 'cart' | 'orders'>('shop');
   const [searchQuery, setSearchQuery] = useState('');
@@ -147,13 +148,17 @@ export default function Medications() {
           setOrders(current => {
             const exists = current.some((o: any) => o.reference === result.medicationOrderId);
             if (exists) return current;
-            return [{
+            const order = {
               ...draft,
               reference: result.medicationOrderId,
               paymentStatus: 'paid',
               paidAmount: result.amountTotal / 100,
               paymentSessionId: sessionId,
-            }, ...current];
+              encounterId: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.id,
+              encounterReference: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.encounterReference,
+            };
+            attachPharmacyOrderToEncounter(order, currentUser?.id, currentUser?.name);
+            return [order, ...current];
           });
 
           setCartItems([]);
@@ -249,8 +254,11 @@ export default function Medications() {
     setIsCheckingOut(true);
     
     try {
+      const latestEncounter = getLatestPatientEncounter(currentUser?.id, currentUser?.name);
       const orderPayload = {
         items: cartItems,
+        encounterId: latestEncounter?.id,
+        encounterReference: latestEncounter?.encounterReference,
         fulfillmentDetails: fulfillmentMode === 'delivery' ? {
           mode: 'delivery',
           ...deliveryForm

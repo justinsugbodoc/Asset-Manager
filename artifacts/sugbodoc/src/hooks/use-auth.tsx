@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
 export type UserRole = 'Patient' | 'Admin' | 'Clinician';
 
 export type SessionUser = {
+  id?: string;
   name: string;
   initials: string;
   email: string;

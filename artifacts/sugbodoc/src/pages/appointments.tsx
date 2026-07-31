@@ -4,6 +4,7 @@ import { upcomingAppointments, pastAppointments, specialties, doctors } from '@/
 import { Calendar as CalendarIcon, Clock, MapPin, User, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
+import { getPatientEncounters } from '@/lib/encounters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,6 +217,7 @@ export default function Appointments() {
 
   const appointmentsList: Appointment[] =
     activeTab === 'upcoming' ? localAppointments : (pastAppointments as Appointment[]);
+  const completedEncounters = getPatientEncounters();
 
   return (
     <AppShell title="Appointments">
@@ -311,6 +313,11 @@ export default function Appointments() {
                         ₱{apt.billing.estimatedInsuranceCoverage.toFixed(2)} covered ·{' '}
                         <span className="font-bold">₱{apt.billing.patientBalance.toFixed(2)} patient balance</span>
                       </div>
+                    )}
+                    {apt.status === 'Completed' && (
+                      <p className="mt-3 text-xs font-semibold text-emerald-700">
+                        Encounter: {completedEncounters.find(encounter => encounter.appointmentId === apt.id)?.encounterReference ?? 'Linked clinical record'}
+                      </p>
                     )}
                   </div>
                 </div>

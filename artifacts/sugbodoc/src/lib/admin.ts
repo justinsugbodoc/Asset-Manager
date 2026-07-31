@@ -14,6 +14,7 @@ import {
 import { getCurrentSessionUser, STORAGE_KEYS, type SessionUser } from '@/hooks/use-auth';
 import { loadClaims, loadInsurance, type InsuranceClaim, type InsuranceRecord } from '@/lib/insurance';
 import { getImagingRecords, getSoapNotes, type ImagingRecord } from '@/lib/clinical';
+import { getPatientEncounters, loadEncounters } from '@/lib/encounters';
 
 export const ADMIN_STORAGE_KEYS = {
   patients: 'sugbodoc_admin_patients',
@@ -37,6 +38,7 @@ export type AdminPatient = SessionUser & {
     encounters: any[];
     soapNotes: any[];
     imaging: ImagingRecord[];
+      vitals: any[];
     diagnoses: any[];
     prescriptions: any[];
     labResults: any[];
@@ -177,6 +179,10 @@ function seedPatients(): AdminPatient[] {
           PHARMACY_ORDER_STORAGE_KEY,
           read<AdminOrder[]>(LEGACY_MEDICATION_ORDER_STORAGE_KEY, []),
         ),
+        encounters: getPatientEncounters(patient.id, patient.name).length
+          ? getPatientEncounters(patient.id, patient.name)
+          : patient.clinical.encounters ?? [],
+        vitals: patient.clinical.vitals ?? [],
       },
     }));
     write(ADMIN_STORAGE_KEYS.patients, normalized);
@@ -206,9 +212,12 @@ function seedPatients(): AdminPatient[] {
       lastActive: new Date().toISOString(),
       clinical: {
         appointments: [...upcomingAppointments, ...pastAppointments],
-        encounters,
+        encounters: getPatientEncounters(`pt_${index + 123}`, user.name).length
+          ? getPatientEncounters(`pt_${index + 123}`, user.name)
+          : loadEncounters().filter(item => item.patientId === currentPatient.id),
         soapNotes: getSoapNotes(),
         imaging: getImagingRecords(),
+        vitals: [],
         diagnoses,
         prescriptions,
         labResults,

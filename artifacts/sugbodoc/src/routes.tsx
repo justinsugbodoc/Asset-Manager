@@ -47,11 +47,11 @@ function AdminRoute() {
 
   useEffect(() => {
     if (!token) setLocation('/login');
-    else if (user?.role !== 'Admin') setLocation('/');
+    else if (user?.role !== 'Admin' && user?.role !== 'Clinician') setLocation('/');
   }, [token, user?.role, setLocation]);
 
   if (!token) return null;
-  if (user?.role !== 'Admin') {
+  if (user?.role !== 'Admin' && user?.role !== 'Clinician') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-background">
         <div className="max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
