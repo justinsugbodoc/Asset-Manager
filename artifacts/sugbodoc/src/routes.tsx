@@ -25,7 +25,16 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
     }
   }, [token, setLocation]);
 
-  if (!token) return null;
+  if (!token) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
+          <p className="mt-3 text-sm text-muted-foreground">Opening sign in…</p>
+        </div>
+      </div>
+    );
+  }
 
   return <Component {...rest} />;
 }
