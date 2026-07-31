@@ -5,6 +5,7 @@ import { Calendar as CalendarIcon, Clock, MapPin, User, ChevronLeft, ChevronRigh
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 import { getPatientEncounters } from '@/lib/encounters';
+import { serverAppointments, serverCreateAppointment, serverUpdateAppointmentStatus } from '@/lib/server';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,11 +88,24 @@ export default function Appointments() {
 
   // Load persisted appointments on mount
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setLocalAppointments(loadAppointments());
-      setLoading(false);
-    }, 500);
-    return () => clearTimeout(timer);
+    let active = true;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await serverAppointments();
+        if (active) {
+          setLocalAppointments(response.appointments as Appointment[]);
+          saveAppointments(response.appointments as Appointment[]);
+        }
+      } catch {
+        if (active) setLocalAppointments(loadAppointments());
+      } finally {
+        if (active) setLoading(false);
+      }
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   const getStatusColor = (status: string) => {
@@ -106,6 +120,7 @@ export default function Appointments() {
     const updated = localAppointments.filter(apt => apt.id !== id);
     setLocalAppointments(updated);
     saveAppointments(updated);
+    void serverUpdateAppointmentStatus(id, 'Cancelled').catch(() => undefined);
     toast({
       title: 'Appointment Cancelled',
       description: 'Your appointment has been successfully cancelled.',
@@ -127,29 +142,40 @@ export default function Appointments() {
     if (isConfirming) return; // prevent double-submit
 
     const currentUser = getCurrentUser();
-    const reference = generateReference();
-
-    const newApt: Appointment = {
-      id: `apt_${Date.now()}`,
-      date: selectedDate,
-      time: selectedTime,
-      doctor: selectedDoctor,
-      status: 'Pending',
-      reference,
-      emailStatus: 'pending',
-      billing: {
-        originalAmount: appointmentEstimate.originalAmount,
-        estimatedInsuranceCoverage: appointmentEstimate.estimatedCoverage,
-        patientBalance: appointmentEstimate.patientBalance,
-      },
+    setIsConfirming(true);
+    const billing = {
+      originalAmount: appointmentEstimate.originalAmount,
+      estimatedInsuranceCoverage: appointmentEstimate.estimatedCoverage,
+      patientBalance: appointmentEstimate.patientBalance,
     };
 
-    // 1. Save to localStorage immediately so it persists regardless of email outcome
+    let newApt: Appointment;
+    try {
+      const response = await serverCreateAppointment({
+        date: selectedDate,
+        time: selectedTime,
+        doctor: selectedDoctor,
+        billing,
+      });
+      newApt = response.appointment as Appointment;
+    } catch {
+      // Preserve the existing prototype path if the shared API is unavailable.
+      newApt = {
+        id: `apt_${Date.now()}`,
+        date: selectedDate,
+        time: selectedTime,
+        doctor: selectedDoctor,
+        status: 'Pending',
+        reference: generateReference(),
+        emailStatus: 'pending',
+        billing,
+      };
+    }
+
     const updated = [newApt, ...localAppointments];
     setLocalAppointments(updated);
     saveAppointments(updated);
-
-    setIsConfirming(true);
+    const reference = newApt.reference ?? generateReference();
 
     // 2. Attempt email through the server.
     let emailSent = false;
@@ -169,7 +195,7 @@ export default function Appointments() {
           clinicName: selectedDoctor.clinic,
           appointmentDate: selectedDate,
           appointmentTime: selectedTime,
-          status: 'Pending',
+          status: newApt.status,
         }),
       });
       if (res.ok) {

@@ -16,6 +16,7 @@ import {
 } from '@/lib/admin';
 import { downloadImagingReport, type ImagingRecord, type SoapNote, getImagingRecords } from '@/lib/clinical';
 import { addEncounterRecord, completeAppointment, getPatientEncounters, isClinicalUser, syncAppointmentStatus, type Encounter, updateEncounter } from '@/lib/encounters';
+import { serverPatients, serverUpdateAppointmentStatus, type ServerPatient } from '@/lib/server';
 
 type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'imaging' | 'claims' | 'reports' | 'audit';
 type PatientTab = 'overview' | 'appointments' | 'clinical' | 'prescriptions' | 'labs' | 'billing' | 'pharmacy' | 'insurance';
@@ -185,6 +186,7 @@ function Appointments({ patients, schedules, onSchedules, onPatients }: { patien
       ? { ...patient, clinical: { ...patient.clinical, appointments: patient.clinical.appointments.map((appointment: any) => appointment.id === entry.id ? { ...appointment, status } : appointment), encounters: encounter ? [...patient.clinical.encounters.filter((item: any) => item.appointmentId !== entry.id), encounter] : patient.clinical.encounters } }
       : patient));
     syncAppointmentStatus({ ...entry, status });
+    void serverUpdateAppointmentStatus(entry.id, status).catch(() => undefined);
     addAuditEvent(`Marked appointment ${status.toLowerCase()}`, `${entry.patient.name} · ${entry.doctor?.name ?? 'Provider'}`);
     if (encounter) addAuditEvent('Linked completed appointment to encounter', encounter.encounterReference);
   };
@@ -280,6 +282,40 @@ function AdminEncounterClinicalPanel({ encounters, selectedEncounterId, onSelect
   </div>;
 }
 
+function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPatient[]): AdminPatient[] {
+  return remotePatients.map((remote) => {
+    const local = localPatients.find((patient) => patient.email.toLowerCase() === remote.email.toLowerCase());
+    const clinical = local?.clinical ?? {
+      appointments: [],
+      encounters: [],
+      soapNotes: [],
+      imaging: [],
+      vitals: [],
+      diagnoses: [],
+      prescriptions: [],
+      labResults: [],
+      bills: [],
+      payments: [],
+      pharmacyOrders: [],
+      insurance: null,
+      claims: [],
+    };
+    const knownIds = new Set(remote.appointments.map(appointment => appointment.id));
+    const legacyAppointments = clinical.appointments.filter((appointment: any) => !knownIds.has(appointment.id));
+    return {
+      ...remote,
+      id: remote.id,
+      role: 'Patient',
+      status: remote.status ?? 'Active',
+      lastActive: remote.lastActive,
+      clinical: {
+        ...clinical,
+        appointments: [...remote.appointments, ...legacyAppointments],
+      },
+    } as AdminPatient;
+  });
+}
+
 export default function Admin() {
   const { logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -292,6 +328,24 @@ export default function Admin() {
   const [schedules, setSchedules] = useState(loadAdminSchedules);
   const [events, setEvents] = useState(loadAuditEvents);
   const [selectedPatient, setSelectedPatient] = useState<AdminPatient | null>(null);
+  useEffect(() => {
+    let active = true;
+    serverPatients()
+      .then(({ patients: remotePatients }) => {
+        if (!active) return;
+        const merged = remotePatients.length
+          ? toAdminPatients(remotePatients, loadAdminPatients())
+          : loadAdminPatients();
+        setPatients(merged);
+        saveAdminPatients(merged);
+      })
+      .catch(() => {
+        // LocalStorage remains the compatibility fallback for the prototype.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const appointments = useMemo(() => patients.flatMap(p => p.clinical.appointments), [patients]);
   const updatePatients = (value: AdminPatient[]) => { setPatients(value); saveAdminPatients(value); setEvents(loadAuditEvents()); };
   const updateMedications = (value: AdminMedication[]) => { setMedications(value); saveAdminMedications(value); setEvents(loadAuditEvents()); };

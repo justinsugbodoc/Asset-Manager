@@ -3,6 +3,7 @@ import { useLocation, Link } from 'wouter';
 import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
 import Logo from '@/components/brand/logo';
+import { serverRegister } from '@/lib/server';
 
 const GENDERS = ['Male', 'Female', 'Other', 'Prefer not to say'];
 
@@ -64,18 +65,37 @@ export default function Register() {
     return '';
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     const validationError = validate();
     if (validationError) { setError(validationError); return; }
 
+    setLoading(true);
+    try {
+      const result = await serverRegister({
+        fullName: form.fullName,
+        email: form.email,
+        phone: form.phone,
+        birthday: form.birthday,
+        gender: form.gender,
+        password: form.password,
+      });
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
+      login(result.token);
+      setSuccess(true);
+      setTimeout(() => setLocation('/'), 1200);
+      return;
+    } catch {
+      // Continue to the local fallback when the shared API is unavailable.
+    }
+
     const existing: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) ?? '[]');
     if (existing.some((u) => u.email.toLowerCase() === form.email.toLowerCase())) {
+      setLoading(false);
       setError('An account with this email already exists.');
       return;
     }
 
-    setLoading(true);
     setTimeout(() => {
       const parts = form.fullName.trim().split(/\s+/);
       const initials =

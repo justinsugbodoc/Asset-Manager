@@ -3,6 +3,7 @@ import { useLocation, Link } from 'wouter';
 import { useAuth, STORAGE_KEYS, type UserRole } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import Logo from '@/components/brand/logo';
+import { serverLogin, serverRegister } from '@/lib/server';
 
 type StoredUser = {
   name: string;
@@ -26,7 +27,7 @@ export default function Login() {
   const { login } = useAuth();
   const [, setLocation] = useLocation();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -38,20 +39,50 @@ export default function Login() {
       (u) => u.email.toLowerCase() === email.toLowerCase(),
     );
 
+    setLoading(true);
+    try {
+      const result = await serverLogin(email, password);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
+      login(result.token);
+      setLocation(result.user.role === 'Admin' || result.user.role === 'Clinician' ? '/admin' : '/');
+      return;
+    } catch {
+      // A locally-created account can be migrated into the shared database below.
+    }
+
     if (!match) {
+      setLoading(false);
       setError('No account found with that email address.');
       return;
     }
     if (match.status === 'Inactive') {
+      setLoading(false);
       setError('This account is inactive. Contact an administrator.');
       return;
     }
     if (match.password !== password) {
+      setLoading(false);
       setError('Incorrect password. Please try again.');
       return;
     }
 
-    setLoading(true);
+    try {
+      const migrated = await serverRegister({
+        fullName: match.name,
+        email: match.email,
+        phone: match.phone,
+        birthday: match.birthday,
+        gender: match.gender,
+        password,
+      });
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(migrated.user));
+      login(migrated.token);
+      setLocation(migrated.user.role === 'Admin' || migrated.user.role === 'Clinician' ? '/admin' : '/');
+      return;
+    } catch {
+      // Keep the local prototype fallback if the API is unavailable.
+    }
+
     setTimeout(() => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _pw, ...sessionUser } = match;
@@ -61,7 +92,7 @@ export default function Login() {
         status: match.status ?? 'Active',
       }));
       login('sugbodoc-auth-token');
-       setLocation(match.role === 'Admin' ? '/admin' : '/');
+       setLocation(match.role === 'Admin' || match.role === 'Clinician' ? '/admin' : '/');
     }, 800);
   };
 
