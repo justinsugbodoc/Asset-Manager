@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, Link } from 'wouter';
-import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
+import { useAuth, STORAGE_KEYS, type UserRole } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import Logo from '@/components/brand/logo';
 
@@ -13,6 +13,8 @@ type StoredUser = {
   birthday: string;
   gender: string;
   bloodType: string;
+  role?: UserRole;
+  status?: 'Active' | 'Inactive';
 };
 
 export default function Login() {
@@ -40,6 +42,10 @@ export default function Login() {
       setError('No account found with that email address.');
       return;
     }
+    if (match.status === 'Inactive') {
+      setError('This account is inactive. Contact an administrator.');
+      return;
+    }
     if (match.password !== password) {
       setError('Incorrect password. Please try again.');
       return;
@@ -49,9 +55,13 @@ export default function Login() {
     setTimeout(() => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _pw, ...sessionUser } = match;
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(sessionUser));
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({
+        ...sessionUser,
+        role: match.role ?? 'Patient',
+        status: match.status ?? 'Active',
+      }));
       login('sugbodoc-auth-token');
-      setLocation('/');
+       setLocation(match.role === 'Admin' ? '/admin' : '/');
     }, 800);
   };
 
@@ -130,6 +140,9 @@ export default function Login() {
               Register
             </Link>
           </p>
+        </div>
+        <div className="mt-5 rounded-xl border border-primary/15 bg-primary/5 p-3 text-center text-xs text-muted-foreground">
+          Admin demo: <span className="font-semibold text-foreground">admin@sugbodoc.test</span> · password <span className="font-semibold text-foreground">admin123</span>
         </div>
       </div>
     </div>

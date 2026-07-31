@@ -11,9 +11,10 @@ import {
   createOrUpdateClaim,
   loadInsurance,
 } from '@/lib/insurance';
+import { loadAdminMedications, type AdminMedication } from '@/lib/admin';
 
 // Dummy catalog data
-const MEDICATIONS_CATALOG = [
+const LEGACY_MEDICATIONS_CATALOG = [
   { id: 'med-001', name: 'Biogesic', genericName: 'Paracetamol', category: 'Pain Relief', form: 'Tablet', dosage: '500mg', price: 7.50, stock: 150, partnerLocations: ['Sugbo Pharmacy Escario', 'Chong Hua Hospital Pharmacy'] },
   { id: 'med-002', name: 'Neozep Forte', genericName: 'Phenylephrine HCl + Chlorphenamine Maleate + Paracetamol', category: 'Cold & Flu', form: 'Tablet', dosage: '10mg/2mg/500mg', price: 8.25, stock: 200, partnerLocations: ['Sugbo Pharmacy Escario', 'Cebu Doctors Hospital Pharmacy'] },
   { id: 'med-003', name: 'Alaxan FR', genericName: 'Ibuprofen + Paracetamol', category: 'Pain Relief', form: 'Capsule', dosage: '200mg/325mg', price: 12.00, stock: 85, partnerLocations: ['Sugbo Pharmacy Escario', 'Southwestern University Medical Center Pharmacy'] },
@@ -63,6 +64,13 @@ export default function Medications() {
   ));
   const [pickupLocation, setPickupLocation] = useState(PARTNER_LOCATIONS[0]);
   const insurance = useMemo(() => loadInsurance(), []);
+  const [catalog, setCatalog] = useState<AdminMedication[]>(() => loadAdminMedications());
+
+  useEffect(() => {
+    const refreshCatalog = () => setCatalog(loadAdminMedications());
+    window.addEventListener('storage', refreshCatalog);
+    return () => window.removeEventListener('storage', refreshCatalog);
+  }, []);
 
   // Sync to localStorage
   useEffect(() => {
@@ -167,13 +175,13 @@ export default function Medications() {
   }, [toast]);
 
   const filteredCatalog = useMemo(() => {
-    return MEDICATIONS_CATALOG.filter(med => {
+    return catalog.filter(med => med.enabled && med.stock > 0).filter(med => {
       const matchesSearch = med.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             med.genericName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCat = categoryFilter === 'All' || med.category === categoryFilter;
       return matchesSearch && matchesCat;
     });
-  }, [searchQuery, categoryFilter]);
+  }, [catalog, searchQuery, categoryFilter]);
 
   const subtotal = cartItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
   const deliveryFee = fulfillmentMode === 'delivery' ? 99 : 0;
@@ -218,7 +226,7 @@ export default function Medications() {
       if (newQuantity <= 0) {
         return current.filter(item => item.id !== id);
       }
-      const med = MEDICATIONS_CATALOG.find(m => m.id === id);
+      const med = catalog.find(m => m.id === id);
       if (med && newQuantity > med.stock) {
         toast({ title: 'Stock limit reached', description: `Only ${med.stock} available.`, variant: 'destructive' });
         return current;

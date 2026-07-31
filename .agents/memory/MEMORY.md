@@ -1,1 +1,2 @@
 - [Medication checkout modal](medication-checkout-modal.md) — native React modal is preferred here because the existing Radix Dialog path triggered a runtime dispatcher issue.
+- [Admin portal prototype](admin-portal-prototype.md) — admin operations use localStorage-backed shared data; clinical records remain read-only by default.
