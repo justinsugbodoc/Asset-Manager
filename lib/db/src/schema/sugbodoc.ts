@@ -15,6 +15,8 @@ export const usersTable = pgTable("sugbodoc_users", {
   role: text("role").notNull().default("Patient"),
   status: text("status").notNull().default("Active"),
   clinicalEditingPermission: text("clinical_editing_permission").notNull().default("false"),
+  insuranceData: jsonb("insurance_data").$type<Record<string, unknown> | null>(),
+  claimsData: jsonb("claims_data").$type<Record<string, unknown>[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -39,6 +41,27 @@ export const appointmentsTable = pgTable("sugbodoc_appointments", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const encountersTable = pgTable("sugbodoc_encounters", {
+  id: text("id").primaryKey(),
+  patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  appointmentId: text("appointment_id").references(() => appointmentsTable.id, { onDelete: "set null" }),
+  reference: text("reference").notNull().unique(),
+  encounterDate: text("encounter_date").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const clinicalRecordsTable = pgTable("sugbodoc_clinical_records", {
+  id: text("id").primaryKey(),
+  patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  encounterId: text("encounter_id").notNull().references(() => encountersTable.id, { onDelete: "cascade" }),
+  recordType: text("record_type").notNull(),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   createdAt: true,
   updatedAt: true,
@@ -50,11 +73,18 @@ export const insertAppointmentSchema = createInsertSchema(appointmentsTable).omi
   createdAt: true,
   updatedAt: true,
 });
+export const insertEncounterSchema = createInsertSchema(encountersTable).omit({
+  createdAt: true,
+  updatedAt: true,
+});
 
 export type User = typeof usersTable.$inferSelect;
 export type Session = typeof sessionsTable.$inferSelect;
 export type Appointment = typeof appointmentsTable.$inferSelect;
+export type Encounter = typeof encountersTable.$inferSelect;
+export type ClinicalRecord = typeof clinicalRecordsTable.$inferSelect;
 export type PublicUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertSession = z.infer<typeof insertSessionSchema>;
 export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
+export type InsertEncounter = z.infer<typeof insertEncounterSchema>;

@@ -4,6 +4,7 @@ import notificationsRouter from "./notifications";
 import stripeRouter from "./stripe";
 import accountsRouter from "./accounts";
 import appointmentsRouter from "./appointments";
+import clinicalRecordsRouter from "./clinical-records";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(notificationsRouter);
 router.use(stripeRouter);
 router.use(accountsRouter);
 router.use(appointmentsRouter);
+router.use(clinicalRecordsRouter);
 
 export default router;

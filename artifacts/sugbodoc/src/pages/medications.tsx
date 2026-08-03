@@ -18,6 +18,7 @@ import {
   type AdminMedication,
 } from '@/lib/admin';
 import { attachPharmacyOrderToEncounter, getLatestPatientEncounter } from '@/lib/encounters';
+import { serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
 
 // Dummy catalog data
 const LEGACY_MEDICATIONS_CATALOG = [
@@ -157,7 +158,19 @@ export default function Medications() {
               encounterId: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.id,
               encounterReference: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.encounterReference,
             };
-            attachPharmacyOrderToEncounter(order, currentUser?.id, currentUser?.name);
+            const localEncounter = attachPharmacyOrderToEncounter(order, currentUser?.id, currentUser?.name);
+            if (localEncounter?.id) {
+              void serverUpdatePatientEncounterData(localEncounter.id, {
+                pharmacyOrders: localEncounter.pharmacyOrders ?? [],
+                billing: localEncounter.billing,
+              }).catch(() => {
+                toast({
+                  title: 'Order saved locally',
+                  description: 'The shared clinical record could not be updated yet.',
+                  variant: 'destructive',
+                });
+              });
+            }
             return [order, ...current];
           });
 
@@ -172,6 +185,7 @@ export default function Medications() {
             status: 'Processing',
             provider: insurance?.provider ?? 'Testing estimate',
           });
+          void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
           localStorage.removeItem('sugbodoc_medication_checkout_draft');
           setActiveTab('orders');
           toast({ title: 'Pharmacy order successful', description: 'Your pharmacy order has been placed and is now pending fulfillment.' });

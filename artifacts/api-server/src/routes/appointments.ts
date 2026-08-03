@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, appointmentsTable, usersTable } from "@workspace/db";
 import { getUserFromRequest, isAdminUser } from "../lib/sugbodoc-auth";
+import { loadPatientEncounters } from "./clinical-records";
 
 const router = Router();
 
@@ -109,8 +110,7 @@ router.get("/admin/patients", async (req, res) => {
     current.push(appointment);
     appointmentsByUser.set(appointment.userId, current);
   }
-  res.json({
-    patients: patients.map(patient => ({
+  const patientRecords = await Promise.all(patients.map(async (patient) => ({
       id: patient.id,
       name: patient.name,
       initials: patient.initials,
@@ -122,9 +122,70 @@ router.get("/admin/patients", async (req, res) => {
       role: patient.role,
       status: patient.status,
       clinicalEditingPermission: patient.clinicalEditingPermission === "true",
+      insurance: patient.insuranceData,
+      claims: patient.claimsData ?? [],
       lastActive: patient.updatedAt,
       appointments: (appointmentsByUser.get(patient.id) ?? []).map(toAppointment),
-    })),
+      records: await loadPatientEncounters(patient.id),
+    })));
+  res.json({ patients: patientRecords });
+});
+
+router.patch("/admin/patients/:id", async (req, res) => {
+  const user = await getUserFromRequest(req);
+  if (!isAdminUser(user)) {
+    res.status(403).json({ error: "Admin access required." });
+    return;
+  }
+  const parsed = z.object({
+    name: z.string().trim().min(2).optional(),
+    status: z.enum(["Active", "Inactive"]).optional(),
+    insurance: z.record(z.string(), z.unknown()).nullable().optional(),
+    claims: z.array(z.record(z.string(), z.unknown())).optional(),
+  }).safeParse(req.body);
+  if (!parsed.success || (
+    !parsed.data.name &&
+    !parsed.data.status &&
+    parsed.data.insurance === undefined &&
+    parsed.data.claims === undefined
+  )) {
+    res.status(400).json({ error: "A valid patient name or status is required." });
+    return;
+  }
+  const [patient] = await db.update(usersTable)
+    .set({
+      ...(parsed.data.name ? { name: parsed.data.name } : {}),
+      ...(parsed.data.name ? { initials: parsed.data.name.trim().split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase() } : {}),
+      ...(parsed.data.status ? { status: parsed.data.status } : {}),
+      ...(parsed.data.insurance !== undefined ? { insuranceData: parsed.data.insurance } : {}),
+      ...(parsed.data.claims !== undefined ? { claimsData: parsed.data.claims } : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(usersTable.id, req.params.id), eq(usersTable.role, "Patient")))
+    .returning();
+  if (!patient) {
+    res.status(404).json({ error: "Patient not found." });
+    return;
+  }
+  res.json({
+    patient: {
+      id: patient.id,
+      name: patient.name,
+      initials: patient.initials,
+      email: patient.email,
+      phone: patient.phone,
+      birthday: patient.birthday,
+      gender: patient.gender,
+      bloodType: patient.bloodType,
+      role: patient.role,
+      status: patient.status,
+      clinicalEditingPermission: patient.clinicalEditingPermission === "true",
+      insurance: patient.insuranceData,
+      claims: patient.claimsData ?? [],
+      lastActive: patient.updatedAt,
+      appointments: [],
+      records: await loadPatientEncounters(patient.id),
+    },
   });
 });
 

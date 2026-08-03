@@ -1,6 +1,7 @@
 export const INSURANCE_STORAGE_KEY = 'sugbodoc_insurance';
 export const INSURANCE_CLAIMS_STORAGE_KEY = 'sugbodoc_insurance_claims';
 
+
 export const INSURANCE_PROVIDERS = ['PhilHealth', 'Maxicare', 'Intellicare', 'Medicard'] as const;
 
 export type InsuranceProvider = (typeof INSURANCE_PROVIDERS)[number];

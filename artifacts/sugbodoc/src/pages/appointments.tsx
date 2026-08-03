@@ -4,8 +4,8 @@ import { upcomingAppointments, pastAppointments, specialties, doctors } from '@/
 import { Calendar as CalendarIcon, Clock, MapPin, User, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
-import { getPatientEncounters } from '@/lib/encounters';
-import { serverAppointments, serverCreateAppointment, serverUpdateAppointmentStatus } from '@/lib/server';
+import type { Encounter } from '@/lib/encounters';
+import { serverAppointments, serverCreateAppointment, serverRecords, serverUpdateAppointmentStatus, serverUpdateMe } from '@/lib/server';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +75,7 @@ export default function Appointments() {
   const [loading, setLoading] = useState(true);
   const [isConfirming, setIsConfirming] = useState(false);
   const [localAppointments, setLocalAppointments] = useState<Appointment[]>([]);
+  const [completedEncounters, setCompletedEncounters] = useState<Encounter[]>([]);
 
   // Booking state
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
@@ -95,6 +96,12 @@ export default function Appointments() {
         if (active) {
           setLocalAppointments(response.appointments as Appointment[]);
           saveAppointments(response.appointments as Appointment[]);
+        }
+        try {
+          const records = await serverRecords();
+          if (active) setCompletedEncounters(records.encounters);
+        } catch {
+          if (active) setCompletedEncounters([]);
         }
       } catch {
         if (active) setLocalAppointments(loadAppointments());
@@ -229,6 +236,7 @@ export default function Appointments() {
       status: 'Processing',
       provider: insurance?.provider ?? 'Testing estimate',
     });
+    void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
 
     setIsConfirming(false);
     resetBooking();
@@ -243,8 +251,6 @@ export default function Appointments() {
 
   const appointmentsList: Appointment[] =
     activeTab === 'upcoming' ? localAppointments : (pastAppointments as Appointment[]);
-  const completedEncounters = getPatientEncounters();
-
   return (
     <AppShell title="Appointments">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">

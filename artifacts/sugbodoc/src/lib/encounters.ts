@@ -82,7 +82,8 @@ function matchingLegacyRecord(appointment: any, index: number) {
   return legacyEncounters[index] ?? legacyEncounters.find(item => item.date === appointment.date);
 }
 
-function createLegacyEncounters(): Encounter[] {
+export function createLegacyEncounters(patient: { id: string; name: string } = { id: currentPatient.id, name: currentPatient.name }): Encounter[] {
+  const patientSuffix = slug(patient.id);
   return pastAppointments.map((appointment: any, index) => {
     const legacy = matchingLegacyRecord(appointment, index);
     const doctor = appointment.doctor;
@@ -92,12 +93,13 @@ function createLegacyEncounters(): Encounter[] {
     const assignedDiagnoses = index === 0 ? diagnoses : [];
     const assignedImaging = getImagingRecords().filter(record => index === 0 ? record.id === 'img_1' : record.id === 'img_2');
     const relatedBills = pastBills.filter(bill => index === 0 ? bill.id === 'bill_3' : bill.id === 'bill_4');
+    const encounterId = `enc_${slug(appointment.id)}_${patientSuffix}`;
     return {
-      id: `enc_${appointment.id}`,
-      encounterReference: `ENC-${slug(appointment.id)}`,
+      id: encounterId,
+      encounterReference: `ENC-${slug(appointment.id)}-${patientSuffix}`,
       appointmentId: appointment.id,
-      patientId: currentPatient.id,
-      patientName: currentPatient.name,
+      patientId: patient.id,
+      patientName: patient.name,
       encounterDate: dateValue(appointment.date),
       date: appointment.date,
       doctorId: doctor.id,
@@ -107,14 +109,14 @@ function createLegacyEncounters(): Encounter[] {
       chiefComplaint: legacy?.complaint ?? 'Completed consultation',
       appointmentDetails: { date: appointment.date, time: appointment.time, status: 'Completed', reference: appointment.reference },
       clinicalSummary: legacy?.summary ?? 'Completed consultation with no clinical summary yet.',
-      soapNotes: soap.map(note => ({ ...note, encounterId: `enc_${appointment.id}` })),
-      diagnoses: assignedDiagnoses.map(item => ({ ...item, encounterId: `enc_${appointment.id}` })),
-      prescriptions: assignedPrescriptions.map(item => ({ ...item, encounterId: `enc_${appointment.id}` })),
-      medications: assignedPrescriptions.map(item => ({ id: `${item.id}_med`, name: item.name, dosage: item.dosage, encounterId: `enc_${appointment.id}` })),
+      soapNotes: soap.map(note => ({ ...note, encounterId })),
+      diagnoses: assignedDiagnoses.map(item => ({ ...item, encounterId })),
+      prescriptions: assignedPrescriptions.map(item => ({ ...item, encounterId })),
+      medications: assignedPrescriptions.map(item => ({ id: `${item.id}_med`, name: item.name, dosage: item.dosage, encounterId })),
       pharmacyOrders: [],
-      vitals: index === 0 ? vitalsData.slice(-1).map(item => ({ ...item, encounterId: `enc_${appointment.id}` })) : [],
-      laboratoryResults: assignedLabs.map(item => ({ ...item, encounterId: `enc_${appointment.id}` })),
-      imaging: assignedImaging.map(item => ({ ...item, encounterId: `enc_${appointment.id}` })),
+      vitals: index === 0 ? vitalsData.slice(-1).map(item => ({ ...item, encounterId })) : [],
+      laboratoryResults: assignedLabs.map(item => ({ ...item, encounterId })),
+      imaging: assignedImaging.map(item => ({ ...item, encounterId })),
       billing: {
         consultationFee: relatedBills.find(bill => bill.description.toLowerCase().includes('consultation'))?.amount ?? 0,
         laboratoryCharges: relatedBills.find(bill => bill.description.toLowerCase().includes('lipid'))?.amount ?? 0,
@@ -135,6 +137,10 @@ export function loadEncounters(): Encounter[] {
   const seeded = createLegacyEncounters();
   saveEncounters(seeded);
   return seeded;
+}
+
+export function createLegacyEncountersForPatient(patient: { id: string; name: string }) {
+  return createLegacyEncounters(patient);
 }
 
 export function saveEncounters(items: Encounter[]) {

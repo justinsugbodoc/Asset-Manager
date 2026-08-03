@@ -14,11 +14,12 @@ import {
   saveAdminSchedules, saveAdminPayments, seedAdminData,
   type AdminMedication, type AdminOrder, type AdminPatient, type AdminPayment, type AdminSchedule,
 } from '@/lib/admin';
-import { downloadImagingReport, type ImagingRecord, type SoapNote, getImagingRecords } from '@/lib/clinical';
-import { addEncounterRecord, completeAppointment, getPatientEncounters, isClinicalUser, syncAppointmentStatus, type Encounter, updateEncounter } from '@/lib/encounters';
-import { serverPatients, serverUpdateAppointmentStatus, type ServerPatient } from '@/lib/server';
+import { downloadImagingReport, type ImagingRecord, type SoapNote } from '@/lib/clinical';
+import { completeAppointment, isClinicalUser, syncAppointmentStatus, type Encounter } from '@/lib/encounters';
+import { createLegacyEncountersForPatient } from '@/lib/encounters';
+import { serverCreateEncounter, serverMigrateRecords, serverPatients, serverUpdateAppointmentStatus, serverUpdateEncounter, serverUpdatePatient, type ServerPatient } from '@/lib/server';
 
-type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'imaging' | 'claims' | 'reports' | 'audit';
+type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
 type PatientTab = 'overview' | 'appointments' | 'clinical' | 'prescriptions' | 'labs' | 'billing' | 'pharmacy' | 'insurance';
 
 const sectionItems: Array<{ id: Section; label: string; icon: any }> = [
@@ -28,7 +29,6 @@ const sectionItems: Array<{ id: Section; label: string; icon: any }> = [
   { id: 'payments', label: 'Payments & Billing', icon: CreditCard },
   { id: 'medications', label: 'Pharmacy Inventory', icon: Package },
   { id: 'orders', label: 'Pharmacy Orders', icon: Truck },
-  { id: 'imaging', label: 'Imaging Records', icon: ImageIcon },
   { id: 'claims', label: 'Insurance & Claims', icon: ShieldCheck },
   { id: 'reports', label: 'Reports', icon: FileText },
   { id: 'audit', label: 'Audit Log', icon: ClipboardList },
@@ -115,7 +115,7 @@ function PatientProfile({ patient, payments, onBack, onUpdate }: { patient: Admi
   const [tab, setTab] = useState<PatientTab>('overview');
   const sessionUser = getCurrentSessionUser();
   const canEditClinical = isClinicalUser(sessionUser);
-  const [patientEncounters, setPatientEncounters] = useState(() => getPatientEncounters(patient.id, patient.name));
+  const [patientEncounters, setPatientEncounters] = useState<Encounter[]>(() => patient.clinical.encounters as Encounter[]);
   const [selectedEncounterId, setSelectedEncounterId] = useState(patientEncounters[0]?.id ?? '');
   const selectedEncounter = patientEncounters.find(item => item.id === selectedEncounterId) ?? patientEncounters[0];
   const encounterBills = selectedEncounter
@@ -125,7 +125,7 @@ function PatientProfile({ patient, payments, onBack, onUpdate }: { patient: Admi
     ? selectedEncounter.billing.payments
     : payments.filter(payment => payment.patientId === patient.id);
   const tabs: Array<[PatientTab, string]> = [['overview', 'Overview'], ['appointments', 'Appointments'], ['clinical', 'Clinical records'], ['prescriptions', 'Prescriptions'], ['labs', 'Lab results'], ['billing', 'Bills & payments'], ['pharmacy', 'Pharmacy Orders'], ['insurance', 'Insurance & claims']];
-  const editSoapNote = (note: any) => {
+  const editSoapNote = async (note: any) => {
     if (!canEditClinical) return;
     const subjective = window.prompt('Subjective', note.subjective);
     if (subjective === null) return;
@@ -135,26 +135,43 @@ function PatientProfile({ patient, payments, onBack, onUpdate }: { patient: Admi
     if (assessment === null) return;
     const plan = window.prompt('Plan', note.plan);
     if (plan === null) return;
-    onUpdate({
-      ...patient,
-      clinical: {
-        ...patient.clinical,
-        soapNotes: patient.clinical.soapNotes.map((item: any) => item.id === note.id ? { ...item, subjective, objective, assessment, plan, status: 'Amended' } : item),
-      },
-    });
-    if (note.encounterId) {
-      const updated = updateEncounter(note.encounterId, encounter => ({
-        ...encounter,
-        soapNotes: encounter.soapNotes.map(item => item.id === note.id ? { ...item, subjective, objective, assessment, plan, status: 'Amended' } : item),
-      }));
-      if (updated) setPatientEncounters(current => current.map(item => item.id === updated.id ? updated : item));
+    if (!note.encounterId) return;
+    const currentEncounter = patientEncounters.find(item => item.id === note.encounterId);
+    if (!currentEncounter) return;
+    const updated = {
+      ...currentEncounter,
+      soapNotes: currentEncounter.soapNotes.map(item => item.id === note.id
+        ? { ...item, subjective, objective, assessment, plan, status: 'Amended' }
+        : item),
+    };
+    try {
+      const response = await serverUpdateEncounter(updated);
+      setPatientEncounters(current => current.map(item => item.id === response.encounter.id ? response.encounter : item));
+      onUpdate({
+        ...patient,
+        clinical: {
+          ...patient.clinical,
+          encounters: patientEncounters.map(item => item.id === response.encounter.id ? response.encounter : item),
+          soapNotes: patient.clinical.soapNotes.map((item: any) => item.id === note.id ? { ...item, subjective, objective, assessment, plan, status: 'Amended' } : item),
+        },
+      });
+      addAuditEvent('Amended SOAP note', note.consultationReference ?? note.id);
+    } catch {
+      addAuditEvent('Failed to amend SOAP note', note.consultationReference ?? note.id);
     }
-    addAuditEvent('Amended SOAP note', note.consultationReference ?? note.id);
   };
-  const updateAccount = (status: 'Active' | 'Inactive') => { onUpdate({ ...patient, status }); addAuditEvent(`${status === 'Active' ? 'Activated' : 'Deactivated'} patient account`, patient.name); };
+  const updateAccount = async (status: 'Active' | 'Inactive') => {
+    try {
+      const response = await serverUpdatePatient(patient.id, { status });
+      onUpdate({ ...patient, ...response.patient, status });
+      addAuditEvent(`${status === 'Active' ? 'Activated' : 'Deactivated'} patient account`, patient.name);
+    } catch {
+      addAuditEvent(`Failed to update patient account`, patient.name);
+    }
+  };
   return <div className="space-y-5">
     <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"><ArrowLeft className="h-4 w-4" /> Back to patients</button>
-    <div className={`${cardClass} overflow-hidden`}><div className="bg-gradient-to-br from-primary/10 via-card to-card p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div className="flex items-center gap-4"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-xl font-bold text-primary-foreground">{patient.initials}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{patient.name}</h1><StatusBadge value={patient.status} /></div><p className="mt-1 text-sm text-muted-foreground">{patient.email} · {patient.phone}</p><p className="mt-1 text-xs text-muted-foreground">Patient ID: {patient.id} · Last active {new Date(patient.lastActive).toLocaleDateString('en-PH')}</p></div></div><div className="flex gap-2"><button onClick={() => updateAccount(patient.status === 'Active' ? 'Inactive' : 'Active')} className={`rounded-xl px-3 py-2 text-xs font-bold ${patient.status === 'Active' ? 'border border-rose-200 text-rose-700 hover:bg-rose-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{patient.status === 'Active' ? 'Deactivate' : 'Activate'}</button><button onClick={() => { const name = window.prompt('Update patient display name', patient.name); if (name?.trim()) { onUpdate({ ...patient, name: name.trim() }); addAuditEvent('Updated patient account', patient.name); } }} className="rounded-xl border border-border px-3 py-2 text-xs font-bold hover:bg-muted"><Pencil className="mr-1 inline h-3 w-3" /> Update</button></div></div></div><div className="flex gap-1 overflow-x-auto border-t border-border p-2">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}</div></div>
+    <div className={`${cardClass} overflow-hidden`}><div className="bg-gradient-to-br from-primary/10 via-card to-card p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div className="flex items-center gap-4"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-xl font-bold text-primary-foreground">{patient.initials}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{patient.name}</h1><StatusBadge value={patient.status} /></div><p className="mt-1 text-sm text-muted-foreground">{patient.email} · {patient.phone}</p><p className="mt-1 text-xs text-muted-foreground">Patient ID: {patient.id} · Last active {new Date(patient.lastActive).toLocaleDateString('en-PH')}</p></div></div><div className="flex gap-2"><button onClick={() => void updateAccount(patient.status === 'Active' ? 'Inactive' : 'Active')} className={`rounded-xl px-3 py-2 text-xs font-bold ${patient.status === 'Active' ? 'border border-rose-200 text-rose-700 hover:bg-rose-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{patient.status === 'Active' ? 'Deactivate' : 'Activate'}</button><button onClick={async () => { const name = window.prompt('Update patient display name', patient.name); if (name?.trim()) { try { const response = await serverUpdatePatient(patient.id, { name: name.trim() }); onUpdate({ ...patient, ...response.patient }); addAuditEvent('Updated patient account', patient.name); } catch { addAuditEvent('Failed to update patient account', patient.name); } } }} className="rounded-xl border border-border px-3 py-2 text-xs font-bold hover:bg-muted"><Pencil className="mr-1 inline h-3 w-3" /> Update</button></div></div></div><div className="flex gap-1 overflow-x-auto border-t border-border p-2">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}</div></div>
     {tab === 'overview' && <div className="grid gap-5 lg:grid-cols-3"><div className={`${cardClass} p-5 lg:col-span-2`}><h2 className="font-bold">Personal information</h2><div className="mt-4 grid gap-4 text-sm sm:grid-cols-2"><Info label="Email" value={patient.email} /><Info label="Phone" value={patient.phone || '—'} /><Info label="Birthday" value={patient.birthday || '—'} /><Info label="Gender" value={patient.gender || '—'} /><Info label="Blood type" value={patient.bloodType || '—'} /><Info label="Account status" value={patient.status} /></div></div><div className={`${cardClass} p-5`}><h2 className="font-bold">Patient summary</h2><div className="mt-4 space-y-3 text-sm"><SummaryLine label="Appointments" value={patient.clinical.appointments.length} /><SummaryLine label="Diagnoses" value={patient.clinical.diagnoses.length} /><SummaryLine label="Prescriptions" value={patient.clinical.prescriptions.length} /><SummaryLine label="Bills" value={patient.clinical.bills.length} /><SummaryLine label="Claims" value={patient.clinical.claims.length} /></div></div></div>}
     {tab === 'appointments' && <SimpleTable columns={['Date', 'Doctor', 'Clinic', 'Status', 'Encounter']} rows={patient.clinical.appointments.map(a => { const encounter = patientEncounters.find(item => item.appointmentId === a.id); return [a.date, a.doctor?.name ?? a.doctor, a.doctor?.clinic ?? '—', a.status, encounter?.encounterReference ?? '—']; })} />}
     {tab === 'clinical' && <AdminEncounterClinicalPanel encounters={patientEncounters} selectedEncounterId={selectedEncounterId} onSelect={setSelectedEncounterId} canEditClinical={canEditClinical} editSoapNote={editSoapNote} />}
@@ -179,16 +196,24 @@ function Appointments({ patients, schedules, onSchedules, onPatients }: { patien
   const [filter, setFilter] = useState('All');
   const entries = patients.flatMap(patient => patient.clinical.appointments.map(appointment => ({ ...appointment, patient })));
   const filtered = entries.filter(item => filter === 'All' || item.status === filter);
-  const update = (entry: any, status: string) => {
+  const update = async (entry: any, status: string) => {
     if (status === 'Completed' && entry.status !== 'Confirmed') return;
     const encounter = status === 'Completed' ? completeAppointment(entry, entry.patient) : null;
+    let sharedEncounter = encounter;
+    if (encounter) {
+      try {
+        sharedEncounter = (await serverCreateEncounter(encounter)).encounter;
+      } catch {
+        return;
+      }
+    }
     onPatients(patients.map(patient => patient.id === entry.patient.id
-      ? { ...patient, clinical: { ...patient.clinical, appointments: patient.clinical.appointments.map((appointment: any) => appointment.id === entry.id ? { ...appointment, status } : appointment), encounters: encounter ? [...patient.clinical.encounters.filter((item: any) => item.appointmentId !== entry.id), encounter] : patient.clinical.encounters } }
+      ? { ...patient, clinical: { ...patient.clinical, appointments: patient.clinical.appointments.map((appointment: any) => appointment.id === entry.id ? { ...appointment, status } : appointment), encounters: sharedEncounter ? [...patient.clinical.encounters.filter((item: any) => item.appointmentId !== entry.id), sharedEncounter] : patient.clinical.encounters } }
       : patient));
     syncAppointmentStatus({ ...entry, status });
     void serverUpdateAppointmentStatus(entry.id, status).catch(() => undefined);
     addAuditEvent(`Marked appointment ${status.toLowerCase()}`, `${entry.patient.name} · ${entry.doctor?.name ?? 'Provider'}`);
-    if (encounter) addAuditEvent('Linked completed appointment to encounter', encounter.encounterReference);
+    if (sharedEncounter) addAuditEvent('Linked completed appointment to encounter', sharedEncounter.encounterReference);
   };
   return <div className="space-y-5"><PageHeading eyebrow="Care operations" title="Appointments & schedules" description="Manage provider availability and appointment status across the patient portal." action={<select value={filter} onChange={e => setFilter(e.target.value)} className={inputClass + ' w-auto'}><option>All</option><option>Confirmed</option><option>Pending</option><option>Completed</option><option>Cancelled</option><option>Rescheduled</option></select>} /><div className={`${cardClass} p-5`}><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Doctor schedules</h2><p className="text-xs text-muted-foreground">Availability used by booking operations</p></div><button onClick={() => onSchedules([...schedules, { id: `schedule_${Date.now()}`, doctorId: 'dr_custom', doctorName: 'New Doctor', specialty: 'Internal Medicine', clinic: 'SugboDoc Main Clinic', day: 'Monday', startTime: '09:00', endTime: '17:00', slots: 8, enabled: true }])} className="rounded-xl bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"><Plus className="mr-1 inline h-3 w-3" /> Add schedule</button></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{schedules.map(schedule => <div key={schedule.id} className="rounded-xl border border-border p-4"><div className="flex justify-between"><p className="font-semibold">{schedule.doctorName}</p><StatusBadge value={schedule.enabled ? 'Active' : 'Disabled'} /></div><p className="mt-1 text-xs text-muted-foreground">{schedule.specialty} · {schedule.clinic}</p><p className="mt-3 text-sm">{schedule.day} · {schedule.startTime}–{schedule.endTime} · {schedule.slots} slots</p><div className="mt-3 flex flex-wrap gap-3"><button onClick={() => { const doctorName = window.prompt('Doctor name', schedule.doctorName) ?? schedule.doctorName; const specialty = window.prompt('Specialty', schedule.specialty) ?? schedule.specialty; const clinic = window.prompt('Clinic', schedule.clinic) ?? schedule.clinic; const day = window.prompt('Day of week', schedule.day) ?? schedule.day; const startTime = window.prompt('Start time (HH:MM)', schedule.startTime) ?? schedule.startTime; const endTime = window.prompt('End time (HH:MM)', schedule.endTime) ?? schedule.endTime; const slots = Number(window.prompt('Available time slots', String(schedule.slots)) ?? schedule.slots); onSchedules(schedules.map(s => s.id === schedule.id ? { ...s, doctorName, specialty, clinic, day, startTime, endTime, slots: Number.isFinite(slots) ? slots : schedule.slots } : s)); addAuditEvent('Updated doctor schedule', doctorName); }} className="text-xs font-bold text-primary hover:underline">Edit provider & slots</button><button onClick={() => onSchedules(schedules.map(s => s.id === schedule.id ? { ...s, enabled: !s.enabled } : s))} className="text-xs font-bold text-primary hover:underline">{schedule.enabled ? 'Disable' : 'Enable'} schedule</button></div></div>)}</div></div><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Provider</th><th className="px-5 py-4">Date & time</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(entry => <tr key={`${entry.patient.id}-${entry.id}`}><td className="px-5 py-4 font-semibold">{entry.patient.name}</td><td className="px-5 py-4">{entry.doctor?.name}</td><td className="px-5 py-4 text-muted-foreground">{entry.date}<br />{entry.time}</td><td className="px-5 py-4"><StatusBadge value={entry.status} />{entry.status === 'Completed' && <p className="mt-1 text-[10px] text-emerald-700">Encounter linked</p>}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-2">{entry.status === 'Confirmed' && <button key="Completed" onClick={() => update(entry, 'Completed')} className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground hover:bg-primary/90">Mark Completed</button>}{['Confirmed', 'Rescheduled', 'Cancelled'].map(action => <button key={action} onClick={() => update(entry, action)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold hover:bg-muted">{action}</button>)}</div></td></tr>)}</tbody></table></div></div></div>;
 }
@@ -215,7 +240,14 @@ function Claims({ patients, onPatients }: { patients: AdminPatient[]; onPatients
   const claims = patients.flatMap(patient => patient.clinical.claims.map(claim => ({ ...claim, patient })));
   const statuses = ['Draft', 'Processing', 'Approved', 'Partially Approved', 'Denied'] as const;
   const update = (claimId: string, patientId: string, status: typeof statuses[number]) => {
-    onPatients(patients.map(patient => patient.id === patientId ? { ...patient, clinical: { ...patient.clinical, claims: patient.clinical.claims.map(claim => claim.id === claimId ? { ...claim, status } : claim) } } : patient));
+    const nextClaims = patients.find(patient => patient.id === patientId)?.clinical.claims
+      .map(claim => claim.id === claimId ? { ...claim, status } : claim) ?? [];
+    onPatients(patients.map(patient => patient.id === patientId
+      ? { ...patient, clinical: { ...patient.clinical, claims: nextClaims } }
+      : patient));
+    void serverUpdatePatient(patientId, { claims: nextClaims as Record<string, unknown>[] }).catch(() => {
+      addAuditEvent('Failed to persist insurance claim status', claimId);
+    });
     addAuditEvent(`Marked insurance claim ${status.toLowerCase()}`, claimId);
   };
   return <div className="space-y-5"><PageHeading eyebrow="Coverage operations" title="Insurance & claims" description="Review mock eligibility, claim amounts, patient balances, and claim statuses." /><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Claim</th><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Related service</th><th className="px-5 py-4">Coverage</th><th className="px-5 py-4">Patient balance</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-border">{claims.map(({ patient, ...claim }) => <tr key={claim.id}><td className="px-5 py-4 font-bold">{claim.reference}<br /><span className="text-xs font-normal text-muted-foreground">{claim.provider}</span></td><td className="px-5 py-4 font-semibold">{patient.name}</td><td className="px-5 py-4 text-muted-foreground">{claim.relatedLabel}<br /><span className="text-xs">{claim.relatedType}</span></td><td className="px-5 py-4 font-bold text-emerald-600">{money(claim.estimatedCoverage)}</td><td className="px-5 py-4 font-bold">{money(claim.patientBalance)}</td><td className="px-5 py-4"><select value={claim.status} onChange={event => update(claim.id, patient.id, event.target.value as typeof statuses[number])} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>{statuses[0]}</option><option>{statuses[1]}</option><option>{statuses[2]}</option><option>{statuses[3]}</option><option>{statuses[4]}</option></select></td></tr>)}</tbody></table>{!claims.length && <EmptyState text="No insurance claims are available." />}</div></div></div>;
@@ -244,14 +276,6 @@ function SoapSection({ title, text }: { title: string; text: string }) {
 function AdminImagingList({ records }: { records: ImagingRecord[] }) {
   const [selected, setSelected] = useState<ImagingRecord | null>(null);
   return <><div className={`${cardClass} p-5`}><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><ImageIcon className="h-5 w-5 text-primary" /><h2 className="text-lg font-bold">Imaging</h2></div><span className="text-xs text-muted-foreground">Read-only</span></div><div className="mt-4 grid gap-4 lg:grid-cols-2">{records.map(record => <div key={record.id} className="rounded-xl border border-border p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-bold">{record.type} · {record.bodyArea}</p><p className="text-xs text-muted-foreground">{record.date} · {record.doctor}</p></div><StatusBadge value={record.status} /></div>{record.imageUrl && <button type="button" onClick={() => setSelected(record)} className="group relative mt-3 block w-full overflow-hidden rounded-lg bg-slate-900"><img src={record.imageUrl} alt={`${record.type} preview`} className="h-32 w-full object-cover transition group-hover:scale-[1.02]" /><span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-black/70 px-2 py-1 text-[10px] font-bold text-white"><Maximize2 className="h-3 w-3" /> Open preview</span></button>}<div className="mt-3 space-y-2 text-sm"><p><strong>Findings:</strong> {record.findings}</p><p><strong>Impression:</strong> {record.impression}</p></div><button type="button" onClick={() => downloadImagingReport(record)} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold text-primary hover:bg-muted"><Download className="h-3.5 w-3.5" /> Download report</button></div>)}</div>{!records.length && <EmptyState text="No imaging records available." />}</div>{selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="Admin imaging preview"><div className="relative max-h-[95vh] max-w-5xl overflow-auto rounded-2xl bg-card p-3 shadow-2xl"><button type="button" onClick={() => setSelected(null)} className="absolute right-5 top-5 z-10 rounded-full bg-black/70 p-2 text-white"><X className="h-5 w-5" /></button><img src={selected.imageUrl} alt={`${selected.type} enlarged preview`} className="max-h-[82vh] w-full rounded-xl object-contain" /><p className="px-2 pt-3 text-sm font-bold">{selected.type} · {selected.bodyArea} · {selected.date}</p></div></div>}</>;
-}
-function ImagingWorkspace({ patients }: { patients: AdminPatient[] }) {
-  const allRecords = patients.flatMap(patient => patient.clinical.imaging.map(record => ({ ...record, patientId: patient.id, patientName: patient.name })));
-  const [query, setQuery] = useState('');
-  const [type, setType] = useState('All');
-  const [date, setDate] = useState('');
-  const filtered = allRecords.filter(record => `${record.patientName} ${record.patientId} ${record.doctor} ${record.bodyArea}`.toLowerCase().includes(query.toLowerCase()) && (type === 'All' || record.type === type) && (!date || record.date.toLowerCase().includes(date.toLowerCase())));
-  return <div className="space-y-5"><PageHeading eyebrow="Clinical records" title="Imaging records" description="Search dummy imaging studies by patient, date, or imaging type. These records are for prototype testing only." /><div className={`${cardClass} p-4`}><div className="grid gap-3 md:grid-cols-[1fr_180px_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Patient, doctor, or body area" className={`${inputClass} pl-9`} /></div><select value={type} onChange={event => setType(event.target.value)} className={inputClass}><option>All</option><option>X-ray</option><option>Ultrasound</option><option>CT scan</option><option>MRI</option></select><input value={date} onChange={event => setDate(event.target.value)} placeholder="Filter date" className={inputClass} /></div></div><div className="grid gap-4 lg:grid-cols-2">{filtered.map(record => <div key={`${record.patientId}-${record.id}`} className={`${cardClass} p-5`}><div className="flex items-start justify-between gap-3"><div><p className="font-bold">{record.type} · {record.bodyArea}</p><p className="text-xs text-muted-foreground">{record.patientName} · {record.date}</p><p className="text-xs text-muted-foreground">{record.doctor}</p></div><StatusBadge value={record.status} /></div>{record.imageUrl && <img src={record.imageUrl} alt={`${record.type} preview`} className="mt-4 h-40 w-full rounded-xl object-cover" />}<div className="mt-4 space-y-2 text-sm"><p><strong>Findings:</strong> {record.findings}</p><p><strong>Impression:</strong> {record.impression}</p></div><button type="button" onClick={() => downloadImagingReport(record)} className="mt-4 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold text-primary hover:bg-muted"><Download className="h-3.5 w-3.5" /> Download report</button></div>)}{!filtered.length && <div className={`${cardClass} lg:col-span-2`}><EmptyState text="No imaging records match your filters." /></div>}</div></div>;
 }
 function EmptyState({ text }: { text: string }) { return <div className="p-10 text-center text-sm text-muted-foreground"><FileText className="mx-auto mb-3 h-8 w-8 opacity-30" />{text}</div>; }
 
@@ -301,7 +325,7 @@ function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPa
       claims: [],
     };
     const knownIds = new Set(remote.appointments.map(appointment => appointment.id));
-    const legacyAppointments = clinical.appointments.filter((appointment: any) => !knownIds.has(appointment.id));
+    const sharedEncounters = remote.records ?? [];
     return {
       ...remote,
       id: remote.id,
@@ -310,7 +334,16 @@ function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPa
       lastActive: remote.lastActive,
       clinical: {
         ...clinical,
-        appointments: [...remote.appointments, ...legacyAppointments],
+        insurance: (remote.insurance as any) ?? clinical.insurance,
+        claims: remote.claims ?? clinical.claims,
+        appointments: remote.appointments,
+        encounters: sharedEncounters,
+        soapNotes: sharedEncounters.flatMap((item: any) => item.soapNotes ?? []),
+        imaging: sharedEncounters.flatMap((item: any) => item.imaging ?? []),
+        vitals: sharedEncounters.flatMap((item: any) => item.vitals ?? []),
+        diagnoses: sharedEncounters.flatMap((item: any) => item.diagnoses ?? []),
+        prescriptions: sharedEncounters.flatMap((item: any) => item.prescriptions ?? []),
+        labResults: sharedEncounters.flatMap((item: any) => item.laboratoryResults ?? []),
       },
     } as AdminPatient;
   });
@@ -331,10 +364,26 @@ export default function Admin() {
   useEffect(() => {
     let active = true;
     serverPatients()
-      .then(({ patients: remotePatients }) => {
+      .then(async ({ patients: remotePatients }) => {
         if (!active) return;
-        const merged = remotePatients.length
-          ? toAdminPatients(remotePatients, loadAdminPatients())
+        const localPatients = loadAdminPatients();
+        const enriched = await Promise.all(remotePatients.map(async remote => {
+          if (remote.records?.length) return remote;
+          const patientId = remote.id;
+          if (!patientId) return remote;
+          const isDemoPatient = remote.email.toLowerCase() === 'juan@example.com';
+          if (!isDemoPatient) return remote;
+          const legacy = createLegacyEncountersForPatient({ id: patientId, name: remote.name });
+          if (!legacy.length) return remote;
+          try {
+            const migrated = await serverMigrateRecords(patientId, legacy);
+            return { ...remote, records: migrated.encounters };
+          } catch {
+            return remote;
+          }
+        }));
+        const merged = enriched.length
+          ? toAdminPatients(enriched, localPatients)
           : loadAdminPatients();
         setPatients(merged);
         saveAdminPatients(merged);
@@ -360,7 +409,6 @@ export default function Admin() {
     section === 'payments' ? <Payments payments={payments} onPayments={updatePayments} /> :
     section === 'medications' ? <Medications medications={medications} onMedications={updateMedications} /> :
     section === 'orders' ? <Orders orders={orders} patients={patients} onOrders={updateOrders} /> :
-    section === 'imaging' ? <ImagingWorkspace patients={patients} /> :
     section === 'claims' ? <Claims patients={patients} onPatients={updatePatients} /> :
     section === 'reports' ? <Reports patients={patients} payments={payments} medications={medications} orders={orders} /> :
     <Audit events={events} />;

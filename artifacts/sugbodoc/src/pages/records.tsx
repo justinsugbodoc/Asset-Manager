@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { currentPatient } from '@/data/mock';
-import { getImagingRecords, downloadImagingReport, type ImagingRecord } from '@/lib/clinical';
+import { downloadImagingReport, type ImagingRecord } from '@/lib/clinical';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
-import { getPatientEncounters, type Encounter } from '@/lib/encounters';
+import { createLegacyEncountersForPatient, type Encounter } from '@/lib/encounters';
+import { serverMigrateRecords, serverRecords } from '@/lib/server';
 import { Activity, Download, FileText, FlaskConical, Image as ImageIcon, Maximize2, Pill, Stethoscope, X } from 'lucide-react';
 
 const cardClass = 'rounded-2xl border border-border bg-card shadow-sm';
@@ -21,20 +22,47 @@ export default function Records() {
   const patientId = (session as any)?.id ?? currentPatient.id;
   const patientName = session?.name ?? currentPatient.name;
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [encounters, setEncounters] = useState<Encounter[]>([]);
   const [selectedEncounterId, setSelectedEncounterId] = useState('');
   const [selectedImage, setSelectedImage] = useState<ImagingRecord | null>(null);
-  const encounters = useMemo(() => getPatientEncounters(patientId, patientName).length ? getPatientEncounters(patientId, patientName) : getPatientEncounters(currentPatient.id, currentPatient.name), [patientId, patientName]);
   const selectedEncounter = encounters.find(item => item.id === selectedEncounterId) ?? encounters[0];
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    const timer = setTimeout(() => setLoading(false), 250);
-    return () => clearTimeout(timer);
-  }, [selectedEncounterId]);
+    setError('');
+    serverRecords(patientId)
+      .then(async response => {
+        if (!active) return;
+        if (response.encounters.length) {
+          setEncounters(response.encounters);
+          return;
+        }
+        if (session?.email?.toLowerCase() !== 'juan@example.com') {
+          setEncounters([]);
+          return;
+        }
+        const legacy = createLegacyEncountersForPatient({ id: patientId, name: patientName });
+        if (!legacy.length) {
+          setEncounters([]);
+          return;
+        }
+        const migrated = await serverMigrateRecords(patientId, legacy);
+        if (active) setEncounters(migrated.encounters);
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load shared clinical records.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [patientId, patientName]);
 
-  const encounterImages = (selectedEncounter?.imaging ?? getImagingRecords()) as ImagingRecord[];
+  const encounterImages = (selectedEncounter?.imaging ?? []) as ImagingRecord[];
   return <AppShell title="Medical Records">
-    {loading ? <div className="h-96 animate-pulse rounded-2xl border border-border bg-card" /> : <div className="space-y-6">
+    {loading ? <div className="h-96 animate-pulse rounded-2xl border border-border bg-card" /> : error ? <EmptyState text={error} /> : <div className="space-y-6">
       <div className={`${cardClass} p-5`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div><p className="text-xs font-bold uppercase tracking-widest text-primary">Clinical Records</p><h1 className="mt-1 text-2xl font-bold">Encounter history</h1><p className="mt-1 text-sm text-muted-foreground">Select a completed encounter to view only the records associated with that appointment.</p></div>

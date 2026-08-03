@@ -7,8 +7,10 @@ import type { Request } from "express";
 const scrypt = promisify(scryptCallback);
 const SESSION_DAYS = 30;
 
-export type AuthUser = Omit<PublicUser, "clinicalEditingPermission"> & {
+export type AuthUser = Omit<PublicUser, "clinicalEditingPermission" | "insuranceData" | "claimsData"> & {
   clinicalEditingPermission: boolean;
+  insurance: Record<string, unknown> | null;
+  claims: Record<string, unknown>[];
 };
 
 function toPublicUser(user: User): AuthUser {
@@ -24,6 +26,8 @@ function toPublicUser(user: User): AuthUser {
     role: user.role as AuthUser["role"],
     status: user.status as AuthUser["status"],
     clinicalEditingPermission: user.clinicalEditingPermission === "true",
+    insurance: user.insuranceData,
+    claims: user.claimsData ?? [],
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -121,6 +125,7 @@ export async function loginUser(email: string, password: string) {
 export async function ensureDemoAdmin() {
   const email = "admin@sugbodoc.test";
   const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  await ensureDemoPatient();
   if (existing[0]) return existing[0];
   const [user] = await db.insert(usersTable).values({
     id: `usr_${randomUUID()}`,
@@ -133,6 +138,29 @@ export async function ensureDemoAdmin() {
     gender: "Prefer not to say",
     bloodType: "",
     role: "Admin",
+    status: "Active",
+    clinicalEditingPermission: "false",
+    insuranceData: null,
+    claimsData: [],
+  }).returning();
+  return user;
+}
+
+export async function ensureDemoPatient() {
+  const email = "juan@example.com";
+  const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  if (existing[0]) return existing[0];
+  const [user] = await db.insert(usersTable).values({
+    id: "pt_123",
+    name: "Juan dela Cruz",
+    initials: "JD",
+    email,
+    passwordHash: await hashPassword("juan123"),
+    phone: "+63 912 345 6789",
+    birthday: "1991-03-15",
+    gender: "Male",
+    bloodType: "O+",
+    role: "Patient",
     status: "Active",
     clinicalEditingPermission: "false",
   }).returning();

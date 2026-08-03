@@ -22,6 +22,8 @@ export type SessionUser = {
   role?: UserRole;
   status?: 'Active' | 'Inactive';
   clinicalEditingPermission?: boolean;
+  insurance?: Record<string, unknown> | null;
+  claims?: Record<string, unknown>[];
 };
 
 export function getCurrentSessionUser(): SessionUser | null {

@@ -1,4 +1,5 @@
 import { STORAGE_KEYS, type SessionUser } from '@/hooks/use-auth';
+import type { Encounter } from '@/lib/encounters';
 
 const base = () => import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
@@ -28,6 +29,7 @@ export type ServerAppointment = {
 export type ServerPatient = SessionUser & {
   lastActive: string;
   appointments: ServerAppointment[];
+  records: Encounter[];
 };
 
 export type ServerAuthResponse = {
@@ -52,6 +54,21 @@ export function serverRegister(input: {
 }) {
   return request<ServerAuthResponse>('/accounts/register', {
     method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function serverUpdateMe(input: {
+  name?: string;
+  email?: string;
+  phone?: string;
+  birthday?: string;
+  gender?: string;
+  insurance?: Record<string, unknown> | null;
+  claims?: Record<string, unknown>[];
+}) {
+  return request<{ user: SessionUser }>('/accounts/me', {
+    method: 'PATCH',
     body: JSON.stringify(input),
   });
 }
@@ -81,4 +98,61 @@ export function serverUpdateAppointmentStatus(id: string, status: string) {
 
 export function serverPatients() {
   return request<{ patients: ServerPatient[] }>('/admin/patients');
+}
+
+export function serverUpdatePatient(id: string, input: {
+  name?: string;
+  status?: 'Active' | 'Inactive';
+  insurance?: Record<string, unknown> | null;
+  claims?: Record<string, unknown>[];
+}) {
+  return request<{ patient: ServerPatient }>(`/admin/patients/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function serverRecords(patientId?: string) {
+  const query = patientId ? `?patientId=${encodeURIComponent(patientId)}` : '';
+  return request<{ patientId: string; encounters: Encounter[] }>(`/records${query}`);
+}
+
+export function serverMigrateRecords(patientId: string, encounters: Encounter[]) {
+  return request<{ patientId: string; encounters: Encounter[] }>('/records/migrate', {
+    method: 'POST',
+    body: JSON.stringify({ patientId, encounters }),
+  });
+}
+
+export function serverCreateEncounter(encounter: Encounter) {
+  return request<{ encounter: Encounter }>('/records', {
+    method: 'POST',
+    body: JSON.stringify(encounter),
+  });
+}
+
+export function serverUpdateEncounter(encounter: Encounter) {
+  return request<{ encounter: Encounter }>(`/records/${encodeURIComponent(encounter.id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(encounter),
+  });
+}
+
+export function serverUpdatePatientEncounterData(
+  encounterId: string,
+  data: {
+    pharmacyOrders?: unknown[];
+    bills?: unknown[];
+    payments?: unknown[];
+    billing?: Record<string, unknown>;
+    claims?: unknown[];
+  },
+) {
+  return request<{ encounter: Encounter }>(
+    `/records/${encodeURIComponent(encounterId)}/patient-data`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    },
+  );
 }

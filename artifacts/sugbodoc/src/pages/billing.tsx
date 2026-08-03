@@ -6,6 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
 import { getLatestPatientEncounter, linkBillingRecordToEncounter } from '@/lib/encounters';
+import { serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
 
 export default function Billing() {
   const currentUser = getCurrentSessionUser();
@@ -75,7 +76,8 @@ export default function Billing() {
             })),
             ...current,
           ]);
-          billsToMarkPaid.forEach(bill => linkBillingRecordToEncounter(
+          billsToMarkPaid.forEach(bill => {
+            const localEncounter = linkBillingRecordToEncounter(
             bill,
             {
               id: `${bill.id}_payment`,
@@ -86,7 +88,21 @@ export default function Billing() {
             },
             currentUser?.id,
             currentUser?.name,
-          ));
+            );
+            if (localEncounter?.id) {
+              void serverUpdatePatientEncounterData(localEncounter.id, {
+                bills: [bill],
+                payments: localEncounter.billing?.payments ?? [],
+                billing: localEncounter.billing,
+              }).catch(() => {
+                toast({
+                  title: 'Payment saved locally',
+                  description: 'The shared billing record could not be updated yet.',
+                  variant: 'destructive',
+                });
+              });
+            }
+          });
           createOrUpdateClaim({
             relatedType: 'bill',
             relatedId: result.billId,
@@ -97,6 +113,7 @@ export default function Billing() {
             status: 'Processing',
             provider: draft?.provider ?? insurance?.provider ?? 'Testing estimate',
           });
+          void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
           localStorage.removeItem('sugbodoc_billing_checkout_draft');
           toast({
             title: 'Payment Successful',

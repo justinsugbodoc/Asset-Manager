@@ -3,10 +3,12 @@ import AppShell from '@/components/layout/app-shell';
 import { STORAGE_KEYS } from '@/hooks/use-auth';
 import { Bell, Globe, Moon, Edit3, HeartPulse, Phone, UserRound, ShieldCheck, Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { serverUpdateMe } from '@/lib/server';
 import {
   getInsuranceStatus,
   INSURANCE_PROVIDERS,
   loadInsurance,
+  loadClaims,
   saveInsurance,
   type InsuranceRecord,
 } from '@/lib/insurance';
@@ -20,6 +22,8 @@ type StoredUser = {
   birthday: string;
   gender: string;
   bloodType: string;
+  insurance?: InsuranceRecord | null;
+  claims?: any[];
 };
 
 function loadCurrentUser(): StoredUser | null {
@@ -36,13 +40,31 @@ export default function Profile() {
   const [user, setUser] = useState<StoredUser | null>(loadCurrentUser);
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<StoredUser | null>(loadCurrentUser);
-  const [insurance, setInsurance] = useState<InsuranceRecord | null>(loadInsurance);
-  const [insuranceForm, setInsuranceForm] = useState<InsuranceRecord>(() => loadInsurance() ?? {
+  const storedSession = loadCurrentUser();
+  const [insurance, setInsurance] = useState<InsuranceRecord | null>(() => (storedSession?.insurance as InsuranceRecord | null) ?? loadInsurance());
+  const [insuranceForm, setInsuranceForm] = useState<InsuranceRecord>(() => (storedSession?.insurance as InsuranceRecord | null) ?? loadInsurance() ?? {
     provider: '',
     memberNumber: '',
     plan: '',
     coverageType: 'HMO',
     expirationDate: '',
+  });
+
+  const mergeUser = (
+    baseUser: StoredUser,
+    remoteUser: Omit<Partial<StoredUser>, 'insurance' | 'claims'> & {
+      insurance?: Record<string, unknown> | null;
+      claims?: Record<string, unknown>[];
+    },
+  ): StoredUser => ({
+    ...baseUser,
+    ...remoteUser,
+    phone: remoteUser.phone ?? baseUser.phone,
+    birthday: remoteUser.birthday ?? baseUser.birthday,
+    gender: remoteUser.gender ?? baseUser.gender,
+    bloodType: remoteUser.bloodType ?? baseUser.bloodType,
+    insurance: remoteUser.insurance as InsuranceRecord | null | undefined,
+    claims: remoteUser.claims,
   });
 
   // Toggles state
@@ -68,21 +90,12 @@ export default function Profile() {
     });
   };
 
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !formData) return;
     const email = formData.email.trim().toLowerCase();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       toast({ title: 'Invalid email address', description: 'Please enter a valid email address.', variant: 'destructive' });
-      return;
-    }
-
-    const users: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) ?? '[]');
-    const duplicate = users.some((candidate) =>
-      candidate.email.toLowerCase() === email && candidate.email.toLowerCase() !== user.email.toLowerCase()
-    );
-    if (duplicate) {
-      toast({ title: 'Email already in use', description: 'Another registered account uses that email address.', variant: 'destructive' });
       return;
     }
 
@@ -95,24 +108,28 @@ export default function Profile() {
         ? `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
         : (parts[0]?.slice(0, 2) || 'U').toUpperCase(),
     };
-    const updatedUsers = users.map((candidate) =>
-      candidate.email.toLowerCase() === user.email.toLowerCase()
-        ? { ...candidate, ...updatedUser, password: candidate.password }
-        : candidate
-    );
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedUser));
-    setUser(updatedUser);
-    setFormData(updatedUser);
-    setIsEditing(false);
-    toast({
-      title: "Profile Updated",
-      description: "Your personal information has been successfully saved.",
-    });
+    try {
+      const response = await serverUpdateMe({
+        name: updatedUser.name,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        birthday: updatedUser.birthday,
+        gender: updatedUser.gender,
+      });
+      const syncedUser = mergeUser(updatedUser, response.user);
+      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
+      setUser(syncedUser);
+      setFormData(syncedUser);
+      setIsEditing(false);
+      toast({ title: "Profile Updated", description: "Your personal information has been saved to the shared patient record." });
+    } catch (error) {
+      toast({ title: "Unable to save profile", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+    }
   };
 
   const handleSaveInsurance = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     if (!insuranceForm.provider || !insuranceForm.memberNumber || !insuranceForm.plan || !insuranceForm.expirationDate) {
       toast({
         title: 'Complete your insurance details',
@@ -123,13 +140,17 @@ export default function Profile() {
     }
 
     const updated = { ...insuranceForm, updatedAt: new Date().toISOString() };
-    saveInsurance(updated);
-    setInsurance(updated);
-    setInsuranceForm(updated);
-    toast({
-      title: 'Insurance details saved',
-      description: 'Coverage is labeled as an estimate for testing only.',
-    });
+    serverUpdateMe({ insurance: updated, claims: loadClaims() })
+      .then(response => {
+        const syncedUser = mergeUser(user, response.user);
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
+        saveInsurance(updated);
+        setUser(syncedUser);
+        setInsurance(updated);
+        setInsuranceForm(updated);
+        toast({ title: 'Insurance details saved', description: 'Coverage is labeled as an estimate for testing only.' });
+      })
+      .catch(error => toast({ title: 'Unable to save insurance', description: error instanceof Error ? error.message : 'Please try again.', variant: 'destructive' }));
   };
 
   if (!user || !formData) {
