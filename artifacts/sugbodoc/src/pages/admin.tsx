@@ -201,14 +201,40 @@ function Appointments({ patients, schedules, onSchedules, onPatients }: { patien
     const encounter = status === 'Completed' ? completeAppointment(entry, entry.patient) : null;
     let sharedEncounter = encounter;
     if (encounter) {
+      const billId = `bill_${entry.id}`;
+      const consultationFee = Number(entry.billing?.originalAmount ?? encounter.billing.consultationFee ?? 0);
+      const estimatedCoverage = Number(entry.billing?.estimatedInsuranceCoverage ?? encounter.billing.insuranceCoverage ?? 0);
+      const patientBalance = Number(entry.billing?.patientBalance ?? Math.max(0, consultationFee - estimatedCoverage));
+      const consultationBill = {
+        id: billId,
+        description: `Consultation - ${entry.doctor?.name ?? encounter.doctor}`,
+        date: entry.date,
+        amount: consultationFee,
+        originalAmount: consultationFee,
+        estimatedInsuranceCoverage: estimatedCoverage,
+        patientBalance,
+        status: 'Pending',
+        encounterId: encounter.id,
+        encounterReference: encounter.encounterReference,
+      };
+      sharedEncounter = {
+        ...encounter,
+        bills: [consultationBill],
+        billing: {
+          ...encounter.billing,
+          consultationFee,
+          insuranceCoverage: estimatedCoverage,
+          relatedBillIds: [...new Set([...(encounter.billing.relatedBillIds ?? []), billId])],
+        },
+      };
       try {
-        sharedEncounter = (await serverCreateEncounter(encounter)).encounter;
+        sharedEncounter = (await serverCreateEncounter(sharedEncounter)).encounter;
       } catch {
         return;
       }
     }
     onPatients(patients.map(patient => patient.id === entry.patient.id
-      ? { ...patient, clinical: { ...patient.clinical, appointments: patient.clinical.appointments.map((appointment: any) => appointment.id === entry.id ? { ...appointment, status } : appointment), encounters: sharedEncounter ? [...patient.clinical.encounters.filter((item: any) => item.appointmentId !== entry.id), sharedEncounter] : patient.clinical.encounters } }
+      ? { ...patient, clinical: { ...patient.clinical, appointments: patient.clinical.appointments.map((appointment: any) => appointment.id === entry.id ? { ...appointment, status } : appointment), encounters: sharedEncounter ? [...patient.clinical.encounters.filter((item: any) => item.appointmentId !== entry.id), sharedEncounter] : patient.clinical.encounters, bills: sharedEncounter?.bills ? [...patient.clinical.bills.filter((bill: any) => bill.encounterId !== sharedEncounter?.id), ...sharedEncounter.bills] : patient.clinical.bills } }
       : patient));
     syncAppointmentStatus({ ...entry, status });
     void serverUpdateAppointmentStatus(entry.id, status).catch(() => undefined);

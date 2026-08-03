@@ -6,12 +6,12 @@ import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
 import { getLatestPatientEncounter, linkBillingRecordToEncounter } from '@/lib/encounters';
-import { serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
+import { serverRecords, serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
 
 export default function Billing() {
   const currentUser = getCurrentSessionUser();
   const activeEncounter = getLatestPatientEncounter(currentUser?.id, currentUser?.name);
-  const [bills, setBills] = useState(() => mockBills.map(bill => ({ ...bill, encounterId: activeEncounter?.id, encounterReference: activeEncounter?.encounterReference })));
+  const [bills, setBills] = useState<any[]>([]);
   const [history, setHistory] = useState(() => pastBills.map(bill => ({ ...bill, encounterId: activeEncounter?.id, encounterReference: activeEncounter?.encounterReference })));
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<any>(null);
@@ -19,6 +19,27 @@ export default function Billing() {
 
   const { toast } = useToast();
   const insurance = useMemo(() => loadInsurance(), []);
+
+  useEffect(() => {
+    let active = true;
+    void serverRecords().then(({ encounters }) => {
+      const sharedBills = encounters.flatMap((encounter: any) =>
+        (encounter.bills ?? []).map((bill: any) => ({
+          ...bill,
+          encounterId: bill.encounterId ?? encounter.id,
+          encounterReference: bill.encounterReference ?? encounter.encounterReference,
+        })),
+      );
+      if (active) {
+        setBills(sharedBills.length ? sharedBills.filter((bill: any) => bill.status !== 'Paid') : mockBills);
+      }
+    }).catch(() => {
+      if (active) setBills(mockBills);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
