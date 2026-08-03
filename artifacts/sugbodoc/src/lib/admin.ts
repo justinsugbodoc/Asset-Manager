@@ -59,6 +59,13 @@ export type AdminPayment = {
   reference: string;
   date: string;
   description: string;
+  billId?: string;
+  orderReference?: string;
+  fulfillmentStatus?: string;
+  fulfillmentMethod?: string;
+  receivedAt?: string;
+  stripeReference?: string;
+  stripeSessionId?: string;
 };
 
 export type AdminMedication = {
@@ -89,6 +96,11 @@ export type AdminOrder = {
   totals: { subtotal: number; estimatedInsuranceCoverage?: number; deliveryFee: number; total: number };
   status: 'Pending' | 'Processing' | 'Ready for Pickup' | 'Out for Delivery' | 'Delivered' | 'Received' | 'Cancelled';
   paymentStatus?: string;
+  billReference?: string;
+  paymentReference?: string;
+  paymentDate?: string;
+  stripeSessionId?: string;
+  fulfillmentStatus?: string;
   createdAt: string;
   receivedAt?: string;
 };

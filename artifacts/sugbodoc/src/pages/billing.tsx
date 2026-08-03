@@ -5,7 +5,29 @@ import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim } from '@/lib/insurance';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
 import { getLatestPatientEncounter } from '@/lib/encounters';
-import { serverConfirmBillPayment, serverCreateBillCheckout, serverRecords, serverUpdateMe } from '@/lib/server';
+import { serverConfirmBillPayment, serverCreateBillCheckout, serverPharmacyOrders, serverRecords, serverUpdateMe } from '@/lib/server';
+
+function pharmacyHistoryRows(orders: any[]) {
+  return orders
+    .filter(order => order.paymentStatus === 'paid' && order.paymentReference)
+    .map(order => ({
+      id: `pharmacy-payment-${order.reference}`,
+      billId: order.billId ?? order.billReference,
+      billReference: order.billReference ?? order.billId,
+      orderReference: order.reference,
+      description: `Pharmacy order ${order.reference}`,
+      date: order.paymentDate ?? order.createdAt,
+      amount: Number(order.paymentAmount ?? order.totals?.total ?? 0),
+      status: 'Paid',
+      receiptId: order.paymentReference,
+      reference: order.paymentReference,
+      stripeReference: order.paymentReference,
+      stripeSessionId: order.stripeSessionId,
+      fulfillmentStatus: order.fulfillmentStatus ?? order.status,
+      fulfillmentMethod: order.fulfillmentDetails?.mode,
+      receivedAt: order.receivedAt,
+    }));
+}
 
 export default function Billing() {
   const currentUser = getCurrentSessionUser();
@@ -23,7 +45,7 @@ export default function Billing() {
 
   useEffect(() => {
     let active = true;
-    void serverRecords().then(({ encounters }) => {
+    void Promise.all([serverRecords(), serverPharmacyOrders()]).then(([{ encounters }, { orders }]) => {
       const sharedBills = encounters.flatMap((encounter: any) =>
         (encounter.bills ?? []).map((bill: any) => ({
           ...bill,
@@ -31,13 +53,14 @@ export default function Billing() {
           encounterReference: bill.encounterReference ?? encounter.encounterReference,
         })),
       );
+      const paidPharmacyOrders = pharmacyHistoryRows(orders);
       if (active) {
         if (sharedBills.length) {
           setBills(sharedBills.filter((bill: any) => bill.status !== 'Paid'));
-          setHistory(sharedBills.filter((bill: any) => bill.status === 'Paid'));
+          setHistory([...sharedBills.filter((bill: any) => bill.status === 'Paid'), ...paidPharmacyOrders]);
         } else {
           setBills([]);
-          setHistory([]);
+          setHistory(paidPharmacyOrders);
         }
         setBillingError(null);
         setIsLoading(false);
@@ -75,6 +98,19 @@ export default function Billing() {
         setHistory((current) => [
           ...paidBills,
           ...current.filter((bill: any) => !paidBillIds.has(String(bill.id))),
+        ]);
+        const [{ encounters }, { orders }] = await Promise.all([serverRecords(), serverPharmacyOrders()]);
+        const refreshedBills = encounters.flatMap((encounter: any) =>
+          (encounter.bills ?? []).map((bill: any) => ({
+            ...bill,
+            encounterId: bill.encounterId ?? encounter.id,
+            encounterReference: bill.encounterReference ?? encounter.encounterReference,
+          })),
+        );
+        setBills(refreshedBills.filter((bill: any) => bill.status !== 'Paid'));
+        setHistory([
+          ...refreshedBills.filter((bill: any) => bill.status === 'Paid'),
+          ...pharmacyHistoryRows(orders),
         ]);
 
         const draft = (() => {
@@ -292,12 +328,15 @@ export default function Billing() {
               {history.map(item => (
                 <div key={item.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/30 transition-colors">
                   <div>
-                    <h4 className="font-medium text-foreground">{item.description}</h4>
+                      <h4 className="font-medium text-foreground">{item.description}</h4>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-sm text-muted-foreground">{item.date}</span>
+                       <span className="text-sm text-muted-foreground">{new Date(item.date).toLocaleString('en-PH')}</span>
                       {(item as any).encounterReference && <span className="text-[10px] font-mono text-primary">{(item as any).encounterReference}</span>}
+                       {(item as any).orderReference && <span className="text-[10px] font-mono text-primary">{(item as any).orderReference}</span>}
                       <span className="text-[10px] bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded-full font-bold uppercase">Paid</span>
                     </div>
+                     {(item as any).billReference && <p className="mt-1 text-[11px] text-muted-foreground">Bill: {(item as any).billReference} · Stripe: {(item as any).stripeReference}</p>}
+                     {(item as any).fulfillmentStatus && <p className="mt-1 text-[11px] text-muted-foreground">Fulfillment: {(item as any).fulfillmentStatus}{(item as any).receivedAt ? ` · Received ${new Date((item as any).receivedAt).toLocaleString('en-PH')}` : ''}</p>}
                   </div>
                   <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2">
                     <span className="font-bold">{formatMoney(item.amount)}</span>

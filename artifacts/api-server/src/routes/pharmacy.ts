@@ -8,6 +8,8 @@ import {
   encountersTable,
   pharmacyMedicationsTable,
   pharmacyOrdersTable,
+  pharmacyBillsTable,
+  pharmacyPaymentsTable,
   usersTable,
 } from "@workspace/db";
 import { getUserFromRequest, isAdminUser } from "../lib/sugbodoc-auth";
@@ -80,6 +82,85 @@ function publicMedication(row: typeof pharmacyMedicationsTable.$inferSelect) {
   };
 }
 
+function pharmacyBillId(reference: string) {
+  return `pharmacy_bill_${reference}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function pharmacyPaymentId(reference: string) {
+  return `pharmacy_payment_${reference}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function paymentReference(sessionId: string) {
+  return `STRIPE-${sessionId.slice(-8).toUpperCase()}`;
+}
+
+async function ensurePharmacyFinancialRecords(
+  tx: any,
+  order: typeof pharmacyOrdersTable.$inferSelect,
+  payment: {
+    amount: number;
+    paidAt: Date;
+    stripeSessionId: string | null;
+    reference: string;
+  },
+) {
+  const orderData = order.data as Record<string, any>;
+  const billId = order.billId ?? pharmacyBillId(order.reference);
+  const amount = Number(payment.amount.toFixed(2));
+  await tx.insert(pharmacyBillsTable).values({
+    id: billId,
+    patientId: order.patientId,
+    orderReference: order.reference,
+    description: `Pharmacy order ${order.reference}`,
+    amount: amount.toFixed(2),
+    status: "Paid",
+    billDate: order.createdAt,
+    paidAt: payment.paidAt,
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: pharmacyBillsTable.id,
+    set: {
+      patientId: order.patientId,
+      amount: amount.toFixed(2),
+      status: "Paid",
+      paidAt: payment.paidAt,
+      updatedAt: new Date(),
+    },
+  });
+  await tx.insert(pharmacyPaymentsTable).values({
+    id: pharmacyPaymentId(order.reference),
+    patientId: order.patientId,
+    orderReference: order.reference,
+    billId,
+    amount: amount.toFixed(2),
+    status: "Paid",
+    paymentDate: payment.paidAt,
+    reference: payment.reference,
+    stripeSessionId: payment.stripeSessionId,
+    fulfillmentStatus: order.status,
+    updatedAt: new Date(),
+  }).onConflictDoUpdate({
+    target: pharmacyPaymentsTable.id,
+    set: {
+      patientId: order.patientId,
+      billId,
+      amount: amount.toFixed(2),
+      status: "Paid",
+      paymentDate: payment.paidAt,
+      reference: payment.reference,
+      stripeSessionId: payment.stripeSessionId,
+      fulfillmentStatus: order.status,
+      updatedAt: new Date(),
+    },
+  });
+  await tx.update(pharmacyOrdersTable).set({
+    billId,
+    data: { ...orderData, billId, paymentReference: payment.reference, paymentDate: payment.paidAt.toISOString() },
+    updatedAt: new Date(),
+  }).where(eq(pharmacyOrdersTable.reference, order.reference));
+  return billId;
+}
+
 async function ensureCatalog() {
   const existing = await db.select().from(pharmacyMedicationsTable).orderBy(asc(pharmacyMedicationsTable.name));
   if (existing.length) return existing;
@@ -142,8 +223,31 @@ async function ensureOrdersFromClinicalRecords() {
       encounterId: record.encounterId,
       status: String(order.status ?? "Pending"),
       paymentStatus: String(order.paymentStatus ?? "pending"),
+      billId: typeof order.billId === "string" ? order.billId : null,
       data: { ...order, patientId: record.patientId, encounterId: record.encounterId },
+      receivedAt: typeof order.receivedAt === "string" ? new Date(order.receivedAt) : null,
     }).onConflictDoNothing();
+  }
+}
+
+async function ensureFinancialRecordsForPaidOrders() {
+  const paidOrders = await db.select().from(pharmacyOrdersTable)
+    .where(eq(pharmacyOrdersTable.paymentStatus, "paid"));
+  for (const order of paidOrders) {
+    const existing = await db.select({ id: pharmacyBillsTable.id })
+      .from(pharmacyBillsTable)
+      .where(eq(pharmacyBillsTable.orderReference, order.reference))
+      .limit(1);
+    if (existing[0]) continue;
+    const data = order.data as any;
+    await db.transaction(async tx => {
+      await ensurePharmacyFinancialRecords(tx, order, {
+        amount: Number(data.paidAmount ?? data.totals?.total ?? 0),
+        paidAt: new Date(data.paymentDate ?? order.updatedAt),
+        stripeSessionId: data.paymentSessionId ?? null,
+        reference: data.paymentReference ?? `LEGACY-${order.reference}`,
+      });
+    });
   }
 }
 
@@ -295,24 +399,41 @@ router.get("/pharmacy/orders", async (req, res) => {
     return;
   }
   await ensureOrdersFromClinicalRecords();
+  await ensureFinancialRecordsForPaidOrders();
   const rows = isAdminUser(user)
     ? await db.select({ order: pharmacyOrdersTable, patientName: usersTable.name })
       .from(pharmacyOrdersTable).innerJoin(usersTable, eq(pharmacyOrdersTable.patientId, usersTable.id))
     : await db.select({ order: pharmacyOrdersTable, patientName: usersTable.name })
       .from(pharmacyOrdersTable).innerJoin(usersTable, eq(pharmacyOrdersTable.patientId, usersTable.id))
       .where(eq(pharmacyOrdersTable.patientId, user.id));
+  const paymentRows = await db.select().from(pharmacyPaymentsTable);
+  const billRows = await db.select().from(pharmacyBillsTable);
   res.json({
-    orders: rows.map(({ order, patientName }) => ({
-      ...(order.data as any),
-      reference: order.reference,
-      patientId: order.patientId,
-      patientName,
-      encounterId: order.encounterId,
-      status: order.status,
-      paymentStatus: order.paymentStatus,
-      createdAt: order.createdAt.toISOString(),
-      updatedAt: order.updatedAt.toISOString(),
-    })),
+    orders: rows.map(({ order, patientName }) => {
+      const payment = paymentRows.find(item => item.orderReference === order.reference);
+      const bill = billRows.find(item => item.orderReference === order.reference);
+      const data = order.data as any;
+      return {
+        ...data,
+        reference: order.reference,
+        patientId: order.patientId,
+        patientName,
+        encounterId: order.encounterId,
+        billId: order.billId ?? bill?.id ?? data.billId,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        receivedAt: order.receivedAt?.toISOString() ?? data.receivedAt,
+        createdAt: order.createdAt.toISOString(),
+        updatedAt: order.updatedAt.toISOString(),
+        billReference: bill?.id,
+        billStatus: bill?.status,
+        paymentAmount: payment ? Number(payment.amount) : undefined,
+        paymentDate: payment?.paymentDate.toISOString(),
+        paymentReference: payment?.reference,
+        stripeSessionId: payment?.stripeSessionId,
+        fulfillmentStatus: payment?.fulfillmentStatus ?? order.status,
+      };
+    }),
   });
 });
 
@@ -340,9 +461,16 @@ router.post("/pharmacy/orders/:reference/confirm-payment", async (req, res) => {
   }
   const current = rows[0];
   if (current.paymentStatus !== "paid") {
-    const orderData = current.data as any;
-    const items = Array.isArray(orderData.items) ? orderData.items : [];
     await db.transaction(async (tx) => {
+      const lockedRows = await tx.select().from(pharmacyOrdersTable)
+        .where(eq(pharmacyOrdersTable.reference, current.reference))
+        .for("update")
+        .limit(1);
+      const lockedOrder = lockedRows[0];
+      if (!lockedOrder) throw new Error("Pharmacy order not found.");
+      if (lockedOrder.paymentStatus === "paid") return;
+      const orderData = lockedOrder.data as any;
+      const items = Array.isArray(orderData.items) ? orderData.items : [];
       for (const item of items) {
         const quantity = Number(item.quantity);
         const changed = await tx.update(pharmacyMedicationsTable)
@@ -353,25 +481,54 @@ router.post("/pharmacy/orders/:reference/confirm-payment", async (req, res) => {
           throw new Error(`Unable to reserve stock for ${String(item.name ?? item.id)}`);
         }
       }
+      const paidAt = new Date();
+      await ensurePharmacyFinancialRecords(tx, lockedOrder, {
+        amount: (session.amount_total ?? 0) / 100,
+        paidAt,
+        stripeSessionId: session.id,
+        reference: paymentReference(session.id),
+      });
+      const updatedData = {
+        ...orderData,
+        status: lockedOrder.status === "Pending" ? "Processing" : lockedOrder.status,
+        paymentStatus: "paid",
+        paidAmount: (session.amount_total ?? 0) / 100,
+        paymentSessionId: session.id,
+        paymentReference: paymentReference(session.id),
+        paymentDate: paidAt.toISOString(),
+      };
+      await tx.update(pharmacyOrdersTable).set({
+        status: updatedData.status,
+        paymentStatus: "paid",
+        data: updatedData,
+        updatedAt: paidAt,
+      }).where(eq(pharmacyOrdersTable.reference, lockedOrder.reference));
+    });
+  } else if (!current.billId) {
+    await db.transaction(async tx => {
+      await ensurePharmacyFinancialRecords(tx, current, {
+        amount: Number((current.data as any).paidAmount ?? (current.data as any).totals?.total ?? 0),
+        paidAt: new Date((current.data as any).paymentDate ?? current.updatedAt),
+        stripeSessionId: String((current.data as any).paymentSessionId ?? session.id),
+        reference: String((current.data as any).paymentReference ?? paymentReference(session.id)),
+      });
     });
   }
-  const orderData = current.data as any;
+  const latestRows = await db.select().from(pharmacyOrdersTable)
+    .where(and(eq(pharmacyOrdersTable.reference, current.reference), eq(pharmacyOrdersTable.patientId, user.id)))
+    .limit(1);
+  const latest = latestRows[0] ?? current;
+  const orderData = latest.data as any;
   const updatedOrder = {
     ...orderData,
-    reference: current.reference,
-    patientId: current.patientId,
-    encounterId: current.encounterId,
-    status: current.status === "Pending" ? "Processing" : current.status,
-    paymentStatus: "paid",
-    paidAmount: (session.amount_total ?? 0) / 100,
-    paymentSessionId: session.id,
+    reference: latest.reference,
+    patientId: latest.patientId,
+    encounterId: latest.encounterId,
+    status: latest.status,
+    paymentStatus: latest.paymentStatus,
   };
-  await db.update(pharmacyOrdersTable).set({
-    status: updatedOrder.status,
-    paymentStatus: "paid",
-    data: updatedOrder,
-    updatedAt: new Date(),
-  }).where(eq(pharmacyOrdersTable.reference, current.reference));
+  await db.update(pharmacyPaymentsTable).set({ fulfillmentStatus: latest.status, updatedAt: new Date() })
+    .where(eq(pharmacyPaymentsTable.orderReference, latest.reference));
   await updateEncounterOrder(updatedOrder);
   res.json({ order: updatedOrder });
 });
@@ -393,11 +550,17 @@ router.patch("/pharmacy/orders/:reference/status", async (req, res) => {
     return;
   }
   const current = rows[0];
+  if (parsed.data === "Received") {
+    res.status(400).json({ error: "Patients must confirm receipt from the Patient portal after delivery or pickup readiness." });
+    return;
+  }
   const updatedOrder = { ...(current.data as any), status: parsed.data, updatedAt: new Date().toISOString() };
   await db.update(pharmacyOrdersTable).set({ status: parsed.data, data: updatedOrder, updatedAt: new Date() })
     .where(eq(pharmacyOrdersTable.reference, req.params.reference));
   await updateEncounterOrder({ ...updatedOrder, reference: current.reference, encounterId: current.encounterId });
-  res.json({ order: { ...updatedOrder, reference: current.reference, status: parsed.data } });
+  await db.update(pharmacyPaymentsTable).set({ fulfillmentStatus: parsed.data, updatedAt: new Date() })
+    .where(eq(pharmacyPaymentsTable.orderReference, current.reference));
+  res.json({ order: { ...updatedOrder, reference: current.reference, status: parsed.data, receivedAt: current.receivedAt?.toISOString() } });
 });
 
 router.patch("/pharmacy/orders/:reference/received", async (req, res) => {
@@ -413,11 +576,28 @@ router.patch("/pharmacy/orders/:reference/received", async (req, res) => {
     return;
   }
   const current = rows[0];
-  const updatedOrder = { ...(current.data as any), status: "Received", receivedAt: new Date().toISOString() };
-  await db.update(pharmacyOrdersTable).set({ status: "Received", data: updatedOrder, updatedAt: new Date() })
-    .where(eq(pharmacyOrdersTable.reference, req.params.reference));
+  if (current.status === "Received" || current.receivedAt) {
+    res.status(409).json({ error: "This pharmacy order has already been marked as received." });
+    return;
+  }
+  if (!["Delivered", "Ready for Pickup"].includes(current.status)) {
+    res.status(409).json({ error: "Receipt can only be confirmed after delivery or when the order is ready for pickup." });
+    return;
+  }
+  const receivedAt = new Date();
+  const updatedOrder = { ...(current.data as any), status: "Received", receivedAt: receivedAt.toISOString() };
+  const changed = await db.update(pharmacyOrdersTable)
+    .set({ status: "Received", receivedAt, data: updatedOrder, updatedAt: receivedAt })
+    .where(and(eq(pharmacyOrdersTable.reference, req.params.reference), eq(pharmacyOrdersTable.status, current.status)))
+    .returning({ reference: pharmacyOrdersTable.reference });
+  if (!changed.length) {
+    res.status(409).json({ error: "This pharmacy order has already been marked as received." });
+    return;
+  }
+  await db.update(pharmacyPaymentsTable).set({ fulfillmentStatus: "Received", updatedAt: receivedAt })
+    .where(eq(pharmacyPaymentsTable.orderReference, current.reference));
   await updateEncounterOrder({ ...updatedOrder, reference: current.reference, encounterId: current.encounterId });
-  res.json({ order: { ...updatedOrder, reference: current.reference, status: "Received" } });
+  res.json({ order: { ...updatedOrder, reference: current.reference, status: "Received", receivedAt: receivedAt.toISOString() } });
 });
 
 export default router;

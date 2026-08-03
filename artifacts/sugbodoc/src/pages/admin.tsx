@@ -272,7 +272,7 @@ function Appointments({ patients, schedules, onSchedules, onPatients }: { patien
 function Payments({ payments }: { payments: AdminPayment[] }) {
   const [query, setQuery] = useState(''); const [status, setStatus] = useState('All');
   const filtered = payments.filter(p => `${p.patientName} ${p.reference} ${p.description}`.toLowerCase().includes(query.toLowerCase()) && (status === 'All' || p.status === status));
-  return <div className="space-y-5"><PageHeading eyebrow="Stripe Test Mode" title="Payments & billing" description="Monitor test transactions, payment status, amounts, and related patients." /><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search patient, reference, or description" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option>All</option><option>Paid</option><option>Pending</option><option>Failed</option><option>Refunded</option></select></div><div className={`${cardClass} overflow-hidden`}><div className="flex items-center gap-2 border-b border-border bg-amber-50 p-4 text-xs text-amber-900"><AlertCircle className="h-4 w-4" /> Payment status is synchronized from Stripe verification and PostgreSQL billing records.</div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Description</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Reference</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(payment => <tr key={payment.id}><td className="px-5 py-4 font-semibold">{payment.patientName}</td><td className="px-5 py-4 text-muted-foreground">{payment.description}<br /><span className="text-xs">{payment.date}</span></td><td className="px-5 py-4 font-bold">{money(payment.amount)}</td><td className="px-5 py-4 font-mono text-xs">{payment.reference}</td><td className="px-5 py-4"><StatusBadge value={payment.status} /></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No payments match your filters." />}</div></div></div>;
+  return <div className="space-y-5"><PageHeading eyebrow="Stripe Test Mode" title="Payments & billing" description="Monitor test transactions, payment status, amounts, and related patients." /><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search patient, reference, or description" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option>All</option><option>Paid</option><option>Pending</option><option>Failed</option><option>Refunded</option></select></div><div className={`${cardClass} overflow-hidden`}><div className="flex items-center gap-2 border-b border-border bg-amber-50 p-4 text-xs text-amber-900"><AlertCircle className="h-4 w-4" /> Payment status is synchronized from Stripe verification and PostgreSQL billing records.</div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Bill / order</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Payment date</th><th className="px-5 py-4">Stripe reference</th><th className="px-5 py-4">Fulfillment</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(payment => <tr key={payment.id}><td className="px-5 py-4 font-semibold">{payment.patientName}</td><td className="px-5 py-4 text-muted-foreground">{payment.description}<br /><span className="text-xs">{payment.billId ? `Bill ${payment.billId}` : 'Clinical bill'}{payment.orderReference ? ` · Order ${payment.orderReference}` : ''}</span></td><td className="px-5 py-4 font-bold">{money(payment.amount)}</td><td className="px-5 py-4 text-xs text-muted-foreground">{orderDateTime(payment.date)}</td><td className="px-5 py-4 font-mono text-xs">{payment.stripeReference ?? payment.reference}</td><td className="px-5 py-4 text-xs text-muted-foreground">{payment.fulfillmentStatus ?? '—'}{payment.receivedAt ? <><br />Received {orderDateTime(payment.receivedAt)}</> : ''}</td><td className="px-5 py-4"><StatusBadge value={payment.status} /></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No payments match your filters." />}</div></div></div>;
 }
 
 function Medications({ medications, onMedications }: { medications: AdminMedication[]; onMedications: (value: AdminMedication[]) => void }) {
@@ -325,7 +325,7 @@ function Orders({ orders, patients, onOrders }: { orders: AdminOrder[]; patients
       })
       .catch(error => window.alert(error instanceof Error ? error.message : 'Unable to update pharmacy order.'));
   };
-  return <div className="space-y-5"><PageHeading eyebrow="Pharmacy fulfillment" title="Pharmacy Orders" description="Update delivery or pickup progress and see whether patients confirmed receipt." /><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Order</th><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Order date & time</th><th className="px-5 py-4">Fulfillment</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Patient received?</th></tr></thead><tbody className="divide-y divide-border">{orders.map(order => <tr key={order.reference}><td className="px-5 py-4 font-mono text-xs font-bold">{order.reference}</td><td className="px-5 py-4 font-semibold">{order.patientName || patients.find(p => p.id === order.patientId)?.name || '—'}</td><td className="px-5 py-4 text-muted-foreground whitespace-nowrap">{orderDateTime(order.createdAt)}</td><td className="px-5 py-4 text-muted-foreground">{order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup'}<br /><span className="text-xs">{order.fulfillmentDetails?.location || order.fulfillmentDetails?.address || '—'}</span></td><td className="px-5 py-4 font-bold">{money(order.totals?.total ?? 0)}</td><td className="px-5 py-4"><select value={order.status} onChange={e => update(order, e.target.value as AdminOrder['status'])} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>Pending</option><option>Processing</option><option>Ready for Pickup</option><option>Out for Delivery</option><option>Delivered</option><option>Received</option><option>Cancelled</option></select></td><td className="px-5 py-4">{order.status === 'Received' ? <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Check className="h-4 w-4" /> Yes</span> : <span className="text-xs text-muted-foreground">No</span>}</td></tr>)}</tbody></table>{!orders.length && <EmptyState text="No pharmacy orders yet." />}</div></div></div>;
+  return <div className="space-y-5"><PageHeading eyebrow="Pharmacy fulfillment" title="Pharmacy Orders" description="Update delivery or pickup progress and see whether patients confirmed receipt." /><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Order / bill</th><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Order date & time</th><th className="px-5 py-4">Fulfillment</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Payment</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Received</th></tr></thead><tbody className="divide-y divide-border">{orders.map(order => <tr key={order.reference}><td className="px-5 py-4 font-mono text-xs font-bold">{order.reference}<br /><span className="font-normal text-muted-foreground">{order.billReference ?? (order as any).billId ?? 'No bill'}</span></td><td className="px-5 py-4 font-semibold">{order.patientName || patients.find(p => p.id === order.patientId)?.name || '—'}</td><td className="px-5 py-4 text-muted-foreground whitespace-nowrap">{orderDateTime(order.createdAt)}</td><td className="px-5 py-4 text-muted-foreground">{order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup'}<br /><span className="text-xs">{order.fulfillmentDetails?.location || order.fulfillmentDetails?.address || '—'}</span></td><td className="px-5 py-4 font-bold">{money((order as any).paymentAmount ?? order.totals?.total ?? 0)}</td><td className="px-5 py-4 text-xs"><StatusBadge value={order.paymentStatus ?? 'pending'} /><br /><span className="font-mono text-[10px]">{order.paymentReference ?? '—'}</span></td><td className="px-5 py-4"><select value={order.status} onChange={e => update(order, e.target.value as AdminOrder['status'])} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>Pending</option><option>Processing</option><option>Ready for Pickup</option><option>Out for Delivery</option><option>Delivered</option><option>Received</option><option>Cancelled</option></select></td><td className="px-5 py-4">{order.receivedAt ? <span className="text-xs font-bold text-emerald-600"><Check className="mr-1 inline h-4 w-4" />{orderDateTime(order.receivedAt)}</span> : <span className="text-xs text-muted-foreground">Not confirmed</span>}</td></tr>)}</tbody></table>{!orders.length && <EmptyState text="No pharmacy orders yet." />}</div></div></div>;
 }
 
 function Claims({ patients, onPatients }: { patients: AdminPatient[]; onPatients: (value: AdminPatient[]) => void }) {
@@ -453,6 +453,28 @@ function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPa
   });
 }
 
+function pharmacyPaymentRows(orders: AdminOrder[]): AdminPayment[] {
+  return orders
+    .filter(order => order.paymentStatus === 'paid' && order.paymentReference)
+    .map(order => ({
+      id: `pharmacy-payment-${order.reference}`,
+      patientId: order.patientId,
+      patientName: order.patientName ?? '—',
+      amount: Number((order as any).paymentAmount ?? order.totals?.total ?? 0),
+      status: 'Paid' as const,
+      reference: order.paymentReference!,
+      date: order.paymentDate ?? order.createdAt,
+      description: `Pharmacy order ${order.reference}`,
+      billId: order.billReference ?? (order as any).billId,
+      orderReference: order.reference,
+      fulfillmentStatus: order.fulfillmentStatus ?? order.status,
+      fulfillmentMethod: order.fulfillmentDetails?.mode,
+      receivedAt: order.receivedAt,
+      stripeReference: order.paymentReference,
+      stripeSessionId: order.stripeSessionId,
+    }));
+}
+
 export default function Admin() {
   const { logout } = useAuth();
   const [, setLocation] = useLocation();
@@ -473,6 +495,7 @@ export default function Admin() {
         setOrders(ordersResponse.orders as AdminOrder[]);
         setSchedules(schedulesResponse.schedules as AdminSchedule[]);
         setEvents(auditResponse.events);
+        setPayments(pharmacyPaymentRows(ordersResponse.orders as AdminOrder[]));
       })
       .catch(() => {
         if (!active) return;
@@ -501,7 +524,10 @@ export default function Admin() {
         }));
         const merged = toAdminPatients(enriched, []);
         setPatients(merged);
-        setPayments(merged.flatMap(patient => patient.clinical.payments));
+        setPayments(current => [
+          ...merged.flatMap(patient => patient.clinical.payments),
+          ...current.filter(payment => payment.orderReference),
+        ]);
       })
       .catch(() => {
         if (active) {
@@ -511,6 +537,27 @@ export default function Admin() {
       });
     return () => {
       active = false;
+    };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const refreshPharmacy = () => {
+      void serverPharmacyOrders().then(({ orders: remoteOrders }) => {
+        if (!active) return;
+        const normalizedOrders = remoteOrders as AdminOrder[];
+        setOrders(normalizedOrders);
+        setPayments(current => [
+          ...current.filter(payment => !payment.orderReference),
+          ...pharmacyPaymentRows(normalizedOrders),
+        ]);
+      }).catch(() => undefined);
+    };
+    window.addEventListener('focus', refreshPharmacy);
+    const interval = window.setInterval(refreshPharmacy, 10000);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refreshPharmacy);
+      window.clearInterval(interval);
     };
   }, []);
   const appointments = useMemo(() => patients.flatMap(p => p.clinical.appointments), [patients]);

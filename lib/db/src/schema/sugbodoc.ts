@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { boolean, integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 
 export const usersTable = pgTable("sugbodoc_users", {
@@ -82,12 +82,47 @@ export const pharmacyOrdersTable = pgTable("sugbodoc_pharmacy_orders", {
   reference: text("reference").primaryKey(),
   patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   encounterId: text("encounter_id").references(() => encountersTable.id, { onDelete: "set null" }),
+  billId: text("bill_id"),
   status: text("status").notNull().default("Pending"),
   paymentStatus: text("payment_status").notNull().default("pending"),
   data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const pharmacyBillsTable = pgTable("sugbodoc_pharmacy_bills", {
+  id: text("id").primaryKey(),
+  patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  orderReference: text("order_reference").notNull().references(() => pharmacyOrdersTable.reference, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").notNull().default("Pending"),
+  billDate: timestamp("bill_date", { withTimezone: true }).notNull().defaultNow(),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  orderReferenceUnique: uniqueIndex("sugbodoc_pharmacy_bills_order_reference_idx").on(table.orderReference),
+}));
+
+export const pharmacyPaymentsTable = pgTable("sugbodoc_pharmacy_payments", {
+  id: text("id").primaryKey(),
+  patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  orderReference: text("order_reference").notNull().references(() => pharmacyOrdersTable.reference, { onDelete: "cascade" }),
+  billId: text("bill_id").notNull().references(() => pharmacyBillsTable.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 10, scale: 2 }).notNull(),
+  status: text("status").notNull().default("Paid"),
+  paymentDate: timestamp("payment_date", { withTimezone: true }).notNull().defaultNow(),
+  reference: text("reference").notNull(),
+  stripeSessionId: text("stripe_session_id"),
+  fulfillmentStatus: text("fulfillment_status").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  orderReferenceUnique: uniqueIndex("sugbodoc_pharmacy_payments_order_reference_idx").on(table.orderReference),
+  stripeSessionUnique: uniqueIndex("sugbodoc_pharmacy_payments_stripe_session_idx").on(table.stripeSessionId),
+}));
 
 export const adminSchedulesTable = pgTable("sugbodoc_admin_schedules", {
   id: text("id").primaryKey(),
@@ -134,6 +169,8 @@ export type Encounter = typeof encountersTable.$inferSelect;
 export type ClinicalRecord = typeof clinicalRecordsTable.$inferSelect;
 export type PharmacyMedication = typeof pharmacyMedicationsTable.$inferSelect;
 export type PharmacyOrder = typeof pharmacyOrdersTable.$inferSelect;
+export type PharmacyBill = typeof pharmacyBillsTable.$inferSelect;
+export type PharmacyPayment = typeof pharmacyPaymentsTable.$inferSelect;
 export type AdminSchedule = typeof adminSchedulesTable.$inferSelect;
 export type AuditEvent = typeof auditEventsTable.$inferSelect;
 export type PublicUser = Omit<User, "passwordHash">;

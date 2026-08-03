@@ -1,5 +1,5 @@
 - [Medication checkout modal](medication-checkout-modal.md) — native React modal is preferred here because the existing Radix Dialog path triggered a runtime dispatcher issue.
-- [Admin portal prototype](admin-portal-prototype.md) — admin operations use localStorage-backed shared data; clinical records remain read-only by default.
+- [Admin portal prototype](admin-portal-prototype.md) — admin operations are database-backed; clinical records remain read-only by default.
 - [Clinical imaging and pharmacy migration](clinical-pharmacy-migration.md) — imaging is dummy/read-only prototype data; pharmacy orders mirror legacy medication-order storage.
 - [Shared pharmacy commerce](shared-pharmacy-commerce.md) — pharmacy catalog, stock, checkout orders, and fulfillment status are database-backed and shared by Patient/Admin.
 - [Shared billing payments](shared-billing-payments.md) — Stripe success must finalize bills and payments through the authenticated database flow before either portal updates its UI.

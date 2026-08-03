@@ -104,11 +104,18 @@ export default function Medications() {
 
   useEffect(() => {
     let active = true;
-    void serverPharmacyOrders().then(({ orders: remoteOrders }) => {
-      if (active) setOrders(remoteOrders);
-    }).catch(() => undefined);
+    const refreshOrders = () => {
+      void serverPharmacyOrders().then(({ orders: remoteOrders }) => {
+        if (active) setOrders(remoteOrders);
+      }).catch(() => undefined);
+    };
+    refreshOrders();
+    window.addEventListener('focus', refreshOrders);
+    const interval = window.setInterval(refreshOrders, 10000);
     return () => {
       active = false;
+      window.removeEventListener('focus', refreshOrders);
+      window.clearInterval(interval);
     };
   }, []);
 
@@ -175,29 +182,9 @@ export default function Medications() {
             throw new Error('The paid amount does not match this order.');
           }
 
-          setOrders(current => {
-            const exists = current.some((o: any) => o.reference === result.medicationOrderId);
-            if (exists) return current;
-            const order = {
-              ...draft,
-              reference: result.medicationOrderId,
-              paymentStatus: 'paid',
-              paidAmount: result.amountTotal / 100,
-              paymentSessionId: sessionId,
-              encounterId: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.id,
-              encounterReference: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.encounterReference,
-            };
-            void serverConfirmPharmacyPayment(result.medicationOrderId, sessionId)
-              .then(({ order: confirmedOrder }) => setOrders(currentOrders => currentOrders.map(existing =>
-                existing.reference === confirmedOrder.reference ? confirmedOrder : existing,
-              )))
-              .catch(error => toast({
-                title: 'Order confirmation failed',
-                description: error instanceof Error ? error.message : 'The payment was received, but the pharmacy order needs support review.',
-                variant: 'destructive',
-              }));
-            return [order, ...current];
-          });
+           await serverConfirmPharmacyPayment(result.medicationOrderId, sessionId);
+           const { orders: refreshedOrders } = await serverPharmacyOrders();
+           setOrders(refreshedOrders);
 
           setCartItems([]);
           const existingClaims = (currentUser?.claims ?? []) as any[];
@@ -339,9 +326,13 @@ export default function Medications() {
   };
 
   const markOrderReceived = async (reference: string) => {
+    const order = orders.find(item => item.reference === reference);
+    if (!order || !['Delivered', 'Ready for Pickup'].includes(order.status)) return;
+    if (!window.confirm(`Confirm that pharmacy order ${reference} was received?`)) return;
     try {
-      const { order } = await serverMarkPharmacyOrderReceived(reference);
-      setOrders(current => current.map(existing => existing.reference === reference ? order : existing));
+      await serverMarkPharmacyOrderReceived(reference);
+      const { orders: refreshedOrders } = await serverPharmacyOrders();
+      setOrders(refreshedOrders);
       toast({
         title: 'Order marked as received',
         description: 'Thanks for confirming that your pharmacy order arrived.',
@@ -627,7 +618,7 @@ export default function Medications() {
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> Paid securely
                         </div>
                       </div>
-                      {order.paymentStatus === 'paid' && order.status !== 'Received' && (
+                       {order.paymentStatus === 'paid' && ['Delivered', 'Ready for Pickup'].includes(order.status) && (
                         <button
                           type="button"
                           onClick={() => markOrderReceived(order.reference)}
@@ -637,6 +628,7 @@ export default function Medications() {
                           Received
                         </button>
                       )}
+                      {order.receivedAt && <p className="text-[11px] text-muted-foreground">Received {new Date(order.receivedAt).toLocaleString('en-PH')}</p>}
                     </div>
                   </div>
                   
