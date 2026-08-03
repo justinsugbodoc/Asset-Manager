@@ -80,54 +80,15 @@ export default function Register() {
         gender: form.gender,
         password: form.password,
       });
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
+      sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
       login(result.token);
       setSuccess(true);
       setTimeout(() => setLocation('/'), 1200);
       return;
-    } catch {
-      // Continue to the local fallback when the shared API is unavailable.
-    }
-
-    const existing: StoredUser[] = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) ?? '[]');
-    if (existing.some((u) => u.email.toLowerCase() === form.email.toLowerCase())) {
+    } catch (error) {
       setLoading(false);
-      setError('An account with this email already exists.');
-      return;
+      setError(error instanceof Error ? error.message : 'Unable to create the account right now.');
     }
-
-    setTimeout(() => {
-      const parts = form.fullName.trim().split(/\s+/);
-      const initials =
-        parts.length >= 2
-          ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-          : form.fullName.slice(0, 2).toUpperCase();
-
-      const newUser: StoredUser = {
-        name: form.fullName.trim(),
-        initials,
-        email: form.email.trim(),
-        password: form.password,
-        phone: form.phone.trim(),
-        birthday: form.birthday,
-        gender: form.gender,
-        bloodType: '',
-      };
-
-      // Save full user list (includes password for login lookup)
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([...existing, newUser]));
-
-      // Save session user without password
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password: _pw, ...sessionUser } = newUser;
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(sessionUser));
-
-      setSuccess(true);
-      setTimeout(() => {
-        login('sugbodoc-auth-token');
-        setLocation('/');
-      }, 1200);
-    }, 900);
   };
 
   const isFormValid = Object.values(form).every((v) => v.trim().length > 0);

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { upcomingAppointments, inbox, bills, activities } from '@/data/mock';
+import { inbox, activities } from '@/data/mock';
 import { Link, useLocation } from 'wouter';
 import { Calendar, MessageSquare, FileText, CreditCard, Clock, ChevronRight, Activity, ShieldCheck } from 'lucide-react';
-import { STORAGE_KEYS } from '@/hooks/use-auth';
-import { calculateInsuranceEstimate, getInsuranceStatus, loadInsurance } from '@/lib/insurance';
+import { getCurrentSessionUser, STORAGE_KEYS } from '@/hooks/use-auth';
+import { calculateInsuranceEstimate, getInsuranceStatus } from '@/lib/insurance';
+import { serverAppointments, serverRecords } from '@/lib/server';
 
 type CurrentUser = {
   name?: string;
@@ -14,7 +15,7 @@ type CurrentUser = {
 
 function loadCurrentUser(): CurrentUser | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    const raw = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     return raw ? (JSON.parse(raw) as CurrentUser) : null;
   } catch {
     return null;
@@ -24,18 +25,38 @@ function loadCurrentUser(): CurrentUser | null {
 export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [user] = useState<CurrentUser | null>(loadCurrentUser);
+  const [appointments, setAppointments] = useState<any[]>([]);
+  const [pendingBills, setPendingBills] = useState<any[]>([]);
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    // Simulate loading data
-    const timer = setTimeout(() => setLoading(false), 600);
-    return () => clearTimeout(timer);
+    let active = true;
+    Promise.all([serverAppointments(), serverRecords()])
+      .then(([appointmentResponse, recordResponse]) => {
+        if (!active) return;
+        setAppointments(appointmentResponse.appointments);
+        setPendingBills(recordResponse.encounters.flatMap((encounter: any) =>
+          (encounter.bills ?? []).filter((bill: any) => bill.status !== 'Paid'),
+        ));
+      })
+      .catch(() => {
+        if (active) {
+          setAppointments([]);
+          setPendingBills([]);
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const nextAppointment = upcomingAppointments[0];
+  const nextAppointment = appointments.find(appointment => !['Completed', 'Cancelled'].includes(appointment.status));
   const unreadMessages = inbox.filter(msg => msg.unread).length;
-  const pendingAmount = bills.reduce((acc, bill) => acc + bill.amount, 0);
-  const insurance = loadInsurance();
+  const pendingAmount = pendingBills.reduce((acc, bill) => acc + Number(bill.amount ?? 0), 0);
+  const insurance = getCurrentSessionUser()?.insurance as Parameters<typeof getInsuranceStatus>[0];
   const insuranceStatus = getInsuranceStatus(insurance);
   const billCoverage = calculateInsuranceEstimate(pendingAmount, insurance, 'bill');
 
@@ -170,9 +191,9 @@ export default function Dashboard() {
             </div>
             
             <div className="bg-card rounded-2xl border border-border overflow-hidden shadow-sm">
-              {upcomingAppointments.length > 0 ? (
+              {appointments.filter(appointment => !['Completed', 'Cancelled'].includes(appointment.status)).length > 0 ? (
                 <div className="divide-y divide-border">
-                  {upcomingAppointments.slice(0, 3).map(apt => (
+                  {appointments.filter(appointment => !['Completed', 'Cancelled'].includes(appointment.status)).slice(0, 3).map(apt => (
                     <div key={apt.id} className="p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:items-center justify-between hover:bg-muted/50 transition-colors">
                       <div className="flex gap-4 items-start">
                         <div className="bg-primary/5 border border-primary/10 rounded-xl p-3 text-center min-w-[70px]">

@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from 'react';
 
-// Canonical localStorage keys
+// Account/session data is intentionally tab-scoped. Shared business data belongs
+// in the database and is loaded through the server helpers.
 export const STORAGE_KEYS = {
   AUTH_TOKEN: 'sugbodoc_auth_token',
   CURRENT_USER: 'sugbodoc_current_user',
@@ -28,7 +29,7 @@ export type SessionUser = {
 
 export function getCurrentSessionUser(): SessionUser | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    const raw = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     return raw ? (JSON.parse(raw) as SessionUser) : null;
   } catch {
     return null;
@@ -69,18 +70,18 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   ensureDemoAdmin();
   const [token, setToken] = useState<string | null>(
-    localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN),
+    sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN),
   );
 
   const login = (newToken: string) => {
-    localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newToken);
+    sessionStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, newToken);
     setToken(newToken);
   };
 
   // Only clears session — does NOT touch sugbodoc_users or sugbodoc_appointments
   const logout = () => {
-    localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    sessionStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+    sessionStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     setToken(null);
   };
 

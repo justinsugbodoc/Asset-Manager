@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
 import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
+import { calculateInsuranceEstimate, createOrUpdateClaim } from '@/lib/insurance';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
 import { getLatestPatientEncounter } from '@/lib/encounters';
 import { serverConfirmBillPayment, serverCreateBillCheckout, serverRecords, serverUpdateMe } from '@/lib/server';
@@ -19,7 +19,7 @@ export default function Billing() {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const { toast } = useToast();
-  const insurance = useMemo(() => loadInsurance(), []);
+  const insurance = useMemo(() => getCurrentSessionUser()?.insurance as Parameters<typeof calculateInsuranceEstimate>[1], []);
 
   useEffect(() => {
     let active = true;
@@ -79,7 +79,7 @@ export default function Billing() {
 
         const draft = (() => {
           try {
-            const raw = localStorage.getItem('sugbodoc_billing_checkout_draft');
+            const raw = sessionStorage.getItem('sugbodoc_billing_checkout_draft');
             return raw ? JSON.parse(raw) as {
               originalAmount: number;
               estimatedCoverage: number;
@@ -90,7 +90,8 @@ export default function Billing() {
             return null;
           }
         })();
-          createOrUpdateClaim({
+          const existingClaims = (getCurrentSessionUser()?.claims ?? []) as any[];
+          const newClaim = createOrUpdateClaim({
             relatedType: 'bill',
             relatedId: paidBillIds.size === 1 ? String([...paidBillIds][0]) : 'all-bills',
             relatedLabel: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
@@ -99,9 +100,12 @@ export default function Billing() {
             patientBalance: draft?.patientBalance ?? paidBills.reduce((sum, bill) => sum + Number(bill.amount ?? 0), 0),
             status: 'Processing',
             provider: draft?.provider ?? insurance?.provider ?? 'Testing estimate',
-          });
-          void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
-          localStorage.removeItem('sugbodoc_billing_checkout_draft');
+          }, existingClaims);
+          const nextClaims = existingClaims.some(claim => claim.relatedType === newClaim.relatedType && claim.relatedId === newClaim.relatedId)
+            ? existingClaims
+            : [newClaim, ...existingClaims];
+          void serverUpdateMe({ claims: nextClaims });
+          sessionStorage.removeItem('sugbodoc_billing_checkout_draft');
           toast({
             title: 'Payment Successful',
             description: `Successfully paid ${formatMoney(paidBills.reduce((sum, bill) => sum + Number(bill.amount ?? 0), 0))} through Stripe.`,
@@ -152,7 +156,7 @@ export default function Billing() {
         cancelUrl: `${appBase}billing?payment=cancelled`,
       });
       if (!result.checkoutUrl) throw new Error('Unable to start Stripe Checkout');
-      localStorage.setItem('sugbodoc_billing_checkout_draft', JSON.stringify({
+      sessionStorage.setItem('sugbodoc_billing_checkout_draft', JSON.stringify({
         billIds: billsToPay.map(bill => bill.id),
         originalAmount,
         estimatedCoverage: estimate.estimatedCoverage,

@@ -272,6 +272,22 @@ router.put("/pharmacy/catalog/:id", async (req, res) => {
   res.json({ medication: publicMedication(saved) });
 });
 
+router.delete("/pharmacy/catalog/:id", async (req, res) => {
+  const user = await getUserFromRequest(req);
+  if (!isAdminUser(user)) {
+    res.status(403).json({ error: "Authorized pharmacy staff are required to remove inventory." });
+    return;
+  }
+  const deleted = await db.delete(pharmacyMedicationsTable)
+    .where(eq(pharmacyMedicationsTable.id, req.params.id))
+    .returning({ id: pharmacyMedicationsTable.id });
+  if (!deleted.length) {
+    res.status(404).json({ error: "Medication not found." });
+    return;
+  }
+  res.json({ deleted: true });
+});
+
 router.get("/pharmacy/orders", async (req, res) => {
   const user = await getUserFromRequest(req);
   if (!user) {

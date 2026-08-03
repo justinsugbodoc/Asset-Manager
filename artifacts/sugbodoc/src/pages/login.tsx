@@ -1,22 +1,9 @@
 import { useState } from 'react';
 import { useLocation, Link } from 'wouter';
-import { useAuth, STORAGE_KEYS, type UserRole } from '@/hooks/use-auth';
+import { useAuth, STORAGE_KEYS } from '@/hooks/use-auth';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
 import Logo from '@/components/brand/logo';
-import { serverLogin, serverRegister } from '@/lib/server';
-
-type StoredUser = {
-  name: string;
-  initials: string;
-  email: string;
-  password: string;
-  phone: string;
-  birthday: string;
-  gender: string;
-  bloodType: string;
-  role?: UserRole;
-  status?: 'Active' | 'Inactive';
-};
+import { serverLogin } from '@/lib/server';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -31,69 +18,17 @@ export default function Login() {
     e.preventDefault();
     setError('');
 
-    const users: StoredUser[] = JSON.parse(
-      localStorage.getItem(STORAGE_KEYS.USERS) ?? '[]',
-    );
-
-    const match = users.find(
-      (u) => u.email.toLowerCase() === email.toLowerCase(),
-    );
-
     setLoading(true);
     try {
       const result = await serverLogin(email, password);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
+      sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
       login(result.token);
       setLocation(result.user.role === 'Admin' || result.user.role === 'Clinician' ? '/admin' : '/');
       return;
-    } catch {
-      // A locally-created account can be migrated into the shared database below.
-    }
-
-    if (!match) {
+    } catch (error) {
       setLoading(false);
-      setError('No account found with that email address.');
-      return;
+      setError(error instanceof Error ? error.message : 'Unable to sign in right now.');
     }
-    if (match.status === 'Inactive') {
-      setLoading(false);
-      setError('This account is inactive. Contact an administrator.');
-      return;
-    }
-    if (match.password !== password) {
-      setLoading(false);
-      setError('Incorrect password. Please try again.');
-      return;
-    }
-
-    try {
-      const migrated = await serverRegister({
-        fullName: match.name,
-        email: match.email,
-        phone: match.phone,
-        birthday: match.birthday,
-        gender: match.gender,
-        password,
-      });
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(migrated.user));
-      login(migrated.token);
-      setLocation(migrated.user.role === 'Admin' || migrated.user.role === 'Clinician' ? '/admin' : '/');
-      return;
-    } catch {
-      // Keep the local prototype fallback if the API is unavailable.
-    }
-
-    setTimeout(() => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { password: _pw, ...sessionUser } = match;
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify({
-        ...sessionUser,
-        role: match.role ?? 'Patient',
-        status: match.status ?? 'Active',
-      }));
-      login('sugbodoc-auth-token');
-       setLocation(match.role === 'Admin' || match.role === 'Clinician' ? '/admin' : '/');
-    }, 800);
   };
 
   return (

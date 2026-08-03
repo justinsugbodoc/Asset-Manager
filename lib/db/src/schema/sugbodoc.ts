@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 
 export const usersTable = pgTable("sugbodoc_users", {
@@ -89,6 +89,28 @@ export const pharmacyOrdersTable = pgTable("sugbodoc_pharmacy_orders", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const adminSchedulesTable = pgTable("sugbodoc_admin_schedules", {
+  id: text("id").primaryKey(),
+  doctorId: text("doctor_id").notNull(),
+  doctorName: text("doctor_name").notNull(),
+  specialty: text("specialty").notNull(),
+  clinic: text("clinic").notNull(),
+  day: text("day").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  slots: integer("slots").notNull().default(0),
+  enabled: boolean("enabled").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const auditEventsTable = pgTable("sugbodoc_audit_events", {
+  id: text("id").primaryKey(),
+  actor: text("actor").notNull(),
+  action: text("action").notNull(),
+  target: text("target").notNull(),
+  timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   createdAt: true,
   updatedAt: true,
@@ -112,6 +134,8 @@ export type Encounter = typeof encountersTable.$inferSelect;
 export type ClinicalRecord = typeof clinicalRecordsTable.$inferSelect;
 export type PharmacyMedication = typeof pharmacyMedicationsTable.$inferSelect;
 export type PharmacyOrder = typeof pharmacyOrdersTable.$inferSelect;
+export type AdminSchedule = typeof adminSchedulesTable.$inferSelect;
+export type AuditEvent = typeof auditEventsTable.$inferSelect;
 export type PublicUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertSession = z.infer<typeof insertSessionSchema>;

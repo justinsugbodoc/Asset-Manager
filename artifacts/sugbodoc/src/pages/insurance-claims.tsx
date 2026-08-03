@@ -3,12 +3,12 @@ import AppShell from '@/components/layout/app-shell';
 import { Link } from 'wouter';
 import { ChevronRight, FileCheck2, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { getCurrentSessionUser } from '@/hooks/use-auth';
+import { serverUpdateMe } from '@/lib/server';
 import {
   formatInsurancePercent,
   getInsuranceStatus,
-  loadClaims,
-  loadInsurance,
-  saveClaims,
+  type InsuranceClaim,
   type InsuranceClaimStatus,
 } from '@/lib/insurance';
 
@@ -22,16 +22,17 @@ const statusStyles: Record<InsuranceClaimStatus, string> = {
 
 export default function InsuranceClaims() {
   const { toast } = useToast();
-  const [claims, setClaims] = useState(loadClaims);
-  const insurance = useMemo(() => loadInsurance(), []);
+  const sessionUser = getCurrentSessionUser();
+  const [claims, setClaims] = useState<InsuranceClaim[]>(() => (sessionUser?.claims ?? []) as InsuranceClaim[]);
+  const insurance = useMemo(() => sessionUser?.insurance as Parameters<typeof getInsuranceStatus>[0], [sessionUser]);
   const insuranceStatus = getInsuranceStatus(insurance);
 
   const simulateDecision = (id: string, status: 'Approved' | 'Partially Approved' | 'Denied') => {
     const updated = claims.map(claim =>
       claim.id === id ? { ...claim, status } : claim,
     );
-    saveClaims(updated);
     setClaims(updated);
+    void serverUpdateMe({ claims: updated });
     toast({
       title: `Claim marked ${status}`,
       description: 'This is a testing-only insurance decision.',

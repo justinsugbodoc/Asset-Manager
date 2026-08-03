@@ -7,9 +7,6 @@ import { serverUpdateMe } from '@/lib/server';
 import {
   getInsuranceStatus,
   INSURANCE_PROVIDERS,
-  loadInsurance,
-  loadClaims,
-  saveInsurance,
   type InsuranceRecord,
 } from '@/lib/insurance';
 
@@ -28,7 +25,7 @@ type StoredUser = {
 
 function loadCurrentUser(): StoredUser | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    const raw = sessionStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     return raw ? (JSON.parse(raw) as StoredUser) : null;
   } catch {
     return null;
@@ -41,8 +38,8 @@ export default function Profile() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<StoredUser | null>(loadCurrentUser);
   const storedSession = loadCurrentUser();
-  const [insurance, setInsurance] = useState<InsuranceRecord | null>(() => (storedSession?.insurance as InsuranceRecord | null) ?? loadInsurance());
-  const [insuranceForm, setInsuranceForm] = useState<InsuranceRecord>(() => (storedSession?.insurance as InsuranceRecord | null) ?? loadInsurance() ?? {
+  const [insurance, setInsurance] = useState<InsuranceRecord | null>(() => (storedSession?.insurance as InsuranceRecord | null) ?? null);
+  const [insuranceForm, setInsuranceForm] = useState<InsuranceRecord>(() => (storedSession?.insurance as InsuranceRecord | null) ?? {
     provider: '',
     memberNumber: '',
     plan: '',
@@ -117,7 +114,7 @@ export default function Profile() {
         gender: updatedUser.gender,
       });
       const syncedUser = mergeUser(updatedUser, response.user);
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
+      sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
       setUser(syncedUser);
       setFormData(syncedUser);
       setIsEditing(false);
@@ -140,11 +137,10 @@ export default function Profile() {
     }
 
     const updated = { ...insuranceForm, updatedAt: new Date().toISOString() };
-    serverUpdateMe({ insurance: updated, claims: loadClaims() })
+    serverUpdateMe({ insurance: updated, claims: user.claims ?? [] })
       .then(response => {
         const syncedUser = mergeUser(user, response.user);
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
-        saveInsurance(updated);
+        sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(syncedUser));
         setUser(syncedUser);
         setInsurance(updated);
         setInsuranceForm(updated);

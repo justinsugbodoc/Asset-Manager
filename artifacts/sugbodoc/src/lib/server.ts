@@ -4,7 +4,7 @@ import type { Encounter } from '@/lib/encounters';
 const base = () => import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  const token = sessionStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
   if (token) headers.set('Authorization', `Bearer ${token}`);
@@ -112,6 +112,49 @@ export function serverUpdatePatient(id: string, input: {
   });
 }
 
+export type ServerSchedule = {
+  id: string;
+  doctorId: string;
+  doctorName: string;
+  specialty: string;
+  clinic: string;
+  day: string;
+  startTime: string;
+  endTime: string;
+  slots: number;
+  enabled: boolean;
+};
+
+export function serverAdminSchedules() {
+  return request<{ schedules: ServerSchedule[] }>('/admin/schedules');
+}
+
+export function serverSaveAdminSchedules(schedules: ServerSchedule[]) {
+  return request<{ schedules: ServerSchedule[] }>('/admin/schedules', {
+    method: 'PUT',
+    body: JSON.stringify({ schedules }),
+  });
+}
+
+export type ServerAuditEvent = {
+  id: string;
+  actor: string;
+  action: string;
+  target: string;
+  timestamp: string;
+};
+
+export function serverAuditEvents() {
+  return request<{ events: ServerAuditEvent[] }>('/admin/audit-events');
+}
+
+export function serverCreateAuditEvent(action: string, target: string) {
+  return request<{ event: ServerAuditEvent }>('/admin/audit-events', {
+    method: 'POST',
+    body: JSON.stringify({ action, target }),
+  });
+}
+
 export function serverRecords(patientId?: string) {
   const query = patientId ? `?patientId=${encodeURIComponent(patientId)}` : '';
   return request<{ patientId: string; encounters: Encounter[] }>(`/records${query}`);
@@ -208,6 +251,12 @@ export function serverUpdatePharmacyMedication(item: ServerMedication) {
   return request<{ medication: ServerMedication }>(`/pharmacy/catalog/${encodeURIComponent(item.id)}`, {
     method: 'PUT',
     body: JSON.stringify(item),
+  });
+}
+
+export function serverDeletePharmacyMedication(id: string) {
+  return request<{ deleted: boolean }>(`/pharmacy/catalog/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
   });
 }
 

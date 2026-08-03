@@ -9,9 +9,7 @@ import { Link, useLocation } from 'wouter';
 import { getCurrentSessionUser, useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import {
-  addAuditEvent, loadAdminMedications, loadAdminOrders, loadAdminPatients, loadAdminPayments,
-  loadAdminSchedules, loadAuditEvents, saveAdminMedications, saveAdminOrders, saveAdminPatients,
-  saveAdminSchedules, saveAdminPayments, seedAdminData,
+  loadAdminMedications, loadAdminOrders, loadAdminPatients, loadAdminPayments,
   type AdminMedication, type AdminOrder, type AdminPatient, type AdminPayment, type AdminSchedule,
 } from '@/lib/admin';
 import { downloadImagingReport, type ImagingRecord, type SoapNote } from '@/lib/clinical';
@@ -19,10 +17,15 @@ import { completeAppointment, isClinicalUser, syncAppointmentStatus, type Encoun
 import { createLegacyEncountersForPatient } from '@/lib/encounters';
 import {
   serverCreateEncounter,
+  serverAdminSchedules,
+  serverAuditEvents,
+  serverCreateAuditEvent,
+  serverDeletePharmacyMedication,
   serverMigrateRecords,
   serverPatients,
   serverPharmacyCatalog,
   serverPharmacyOrders,
+  serverSaveAdminSchedules,
   serverUpdateAppointmentStatus,
   serverUpdateEncounter,
   serverUpdatePatient,
@@ -55,6 +58,10 @@ const badge = (status: string) => {
   return 'bg-amber-100 text-amber-800';
 };
 
+function addAuditEvent(action: string, target: string) {
+  void serverCreateAuditEvent(action, target);
+}
+
 function StatusBadge({ value }: { value: string }) {
   return <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${badge(value)}`}>{value}</span>;
 }
@@ -72,7 +79,7 @@ function AdminShell({
         </div>
         <div className="border-b border-border bg-primary/5 px-5 py-4">
           <p className="text-xs font-bold uppercase tracking-wider text-primary">Administrator workspace</p>
-          <p className="mt-1 text-xs text-muted-foreground">Prototype data · localStorage</p>
+          <p className="mt-1 text-xs text-muted-foreground">Shared PostgreSQL operations</p>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {sectionItems.map(item => (
@@ -256,10 +263,10 @@ function Appointments({ patients, schedules, onSchedules, onPatients }: { patien
   return <div className="space-y-5"><PageHeading eyebrow="Care operations" title="Appointments & schedules" description="Manage provider availability and appointment status across the patient portal." action={<select value={filter} onChange={e => setFilter(e.target.value)} className={inputClass + ' w-auto'}><option>All</option><option>Confirmed</option><option>Pending</option><option>Completed</option><option>Cancelled</option><option>Rescheduled</option></select>} /><div className={`${cardClass} p-5`}><div className="mb-4 flex items-center justify-between"><div><h2 className="font-bold">Doctor schedules</h2><p className="text-xs text-muted-foreground">Availability used by booking operations</p></div><button onClick={() => onSchedules([...schedules, { id: `schedule_${Date.now()}`, doctorId: 'dr_custom', doctorName: 'New Doctor', specialty: 'Internal Medicine', clinic: 'SugboDoc Main Clinic', day: 'Monday', startTime: '09:00', endTime: '17:00', slots: 8, enabled: true }])} className="rounded-xl bg-primary px-3 py-2 text-xs font-bold text-primary-foreground"><Plus className="mr-1 inline h-3 w-3" /> Add schedule</button></div><div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{schedules.map(schedule => <div key={schedule.id} className="rounded-xl border border-border p-4"><div className="flex justify-between"><p className="font-semibold">{schedule.doctorName}</p><StatusBadge value={schedule.enabled ? 'Active' : 'Disabled'} /></div><p className="mt-1 text-xs text-muted-foreground">{schedule.specialty} · {schedule.clinic}</p><p className="mt-3 text-sm">{schedule.day} · {schedule.startTime}–{schedule.endTime} · {schedule.slots} slots</p><div className="mt-3 flex flex-wrap gap-3"><button onClick={() => { const doctorName = window.prompt('Doctor name', schedule.doctorName) ?? schedule.doctorName; const specialty = window.prompt('Specialty', schedule.specialty) ?? schedule.specialty; const clinic = window.prompt('Clinic', schedule.clinic) ?? schedule.clinic; const day = window.prompt('Day of week', schedule.day) ?? schedule.day; const startTime = window.prompt('Start time (HH:MM)', schedule.startTime) ?? schedule.startTime; const endTime = window.prompt('End time (HH:MM)', schedule.endTime) ?? schedule.endTime; const slots = Number(window.prompt('Available time slots', String(schedule.slots)) ?? schedule.slots); onSchedules(schedules.map(s => s.id === schedule.id ? { ...s, doctorName, specialty, clinic, day, startTime, endTime, slots: Number.isFinite(slots) ? slots : schedule.slots } : s)); addAuditEvent('Updated doctor schedule', doctorName); }} className="text-xs font-bold text-primary hover:underline">Edit provider & slots</button><button onClick={() => onSchedules(schedules.map(s => s.id === schedule.id ? { ...s, enabled: !s.enabled } : s))} className="text-xs font-bold text-primary hover:underline">{schedule.enabled ? 'Disable' : 'Enable'} schedule</button></div></div>)}</div></div><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Provider</th><th className="px-5 py-4">Date & time</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(entry => <tr key={`${entry.patient.id}-${entry.id}`}><td className="px-5 py-4 font-semibold">{entry.patient.name}</td><td className="px-5 py-4">{entry.doctor?.name}</td><td className="px-5 py-4 text-muted-foreground">{entry.date}<br />{entry.time}</td><td className="px-5 py-4"><StatusBadge value={entry.status} />{entry.status === 'Completed' && <p className="mt-1 text-[10px] text-emerald-700">Encounter linked</p>}</td><td className="px-5 py-4"><div className="flex flex-wrap gap-2">{entry.status === 'Confirmed' && <button key="Completed" onClick={() => update(entry, 'Completed')} className="rounded-lg bg-primary px-2 py-1 text-[10px] font-bold text-primary-foreground hover:bg-primary/90">Mark Completed</button>}{['Confirmed', 'Rescheduled', 'Cancelled'].map(action => <button key={action} onClick={() => update(entry, action)} className="rounded-lg border border-border px-2 py-1 text-[10px] font-bold hover:bg-muted">{action}</button>)}</div></td></tr>)}</tbody></table></div></div></div>;
 }
 
-function Payments({ payments, onPayments }: { payments: AdminPayment[]; onPayments: (value: AdminPayment[]) => void }) {
+function Payments({ payments }: { payments: AdminPayment[] }) {
   const [query, setQuery] = useState(''); const [status, setStatus] = useState('All');
   const filtered = payments.filter(p => `${p.patientName} ${p.reference} ${p.description}`.toLowerCase().includes(query.toLowerCase()) && (status === 'All' || p.status === status));
-  return <div className="space-y-5"><PageHeading eyebrow="Stripe Test Mode" title="Payments & billing" description="Monitor test transactions, payment status, amounts, and related patients." /><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search patient, reference, or description" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option>All</option><option>Paid</option><option>Pending</option><option>Failed</option><option>Refunded</option></select></div><div className={`${cardClass} overflow-hidden`}><div className="flex items-center gap-2 border-b border-border bg-amber-50 p-4 text-xs text-amber-900"><AlertCircle className="h-4 w-4" /> Test Mode monitoring · no live charges are made from this prototype.</div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Description</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Reference</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Action</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(payment => <tr key={payment.id}><td className="px-5 py-4 font-semibold">{payment.patientName}</td><td className="px-5 py-4 text-muted-foreground">{payment.description}<br /><span className="text-xs">{payment.date}</span></td><td className="px-5 py-4 font-bold">{money(payment.amount)}</td><td className="px-5 py-4 font-mono text-xs">{payment.reference}</td><td className="px-5 py-4"><StatusBadge value={payment.status} /></td><td className="px-5 py-4"><select value={payment.status} onChange={e => onPayments(payments.map(p => p.id === payment.id ? { ...p, status: e.target.value as AdminPayment['status'] } : p))} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>Paid</option><option>Pending</option><option>Failed</option><option>Refunded</option></select></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No payments match your filters." />}</div></div></div>;
+  return <div className="space-y-5"><PageHeading eyebrow="Stripe Test Mode" title="Payments & billing" description="Monitor test transactions, payment status, amounts, and related patients." /><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search patient, reference, or description" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option>All</option><option>Paid</option><option>Pending</option><option>Failed</option><option>Refunded</option></select></div><div className={`${cardClass} overflow-hidden`}><div className="flex items-center gap-2 border-b border-border bg-amber-50 p-4 text-xs text-amber-900"><AlertCircle className="h-4 w-4" /> Payment status is synchronized from Stripe verification and PostgreSQL billing records.</div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Description</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Reference</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(payment => <tr key={payment.id}><td className="px-5 py-4 font-semibold">{payment.patientName}</td><td className="px-5 py-4 text-muted-foreground">{payment.description}<br /><span className="text-xs">{payment.date}</span></td><td className="px-5 py-4 font-bold">{money(payment.amount)}</td><td className="px-5 py-4 font-mono text-xs">{payment.reference}</td><td className="px-5 py-4"><StatusBadge value={payment.status} /></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No payments match your filters." />}</div></div></div>;
 }
 
 function Medications({ medications, onMedications }: { medications: AdminMedication[]; onMedications: (value: AdminMedication[]) => void }) {
@@ -297,7 +304,10 @@ function Medications({ medications, onMedications }: { medications: AdminMedicat
         window.alert(error instanceof Error ? error.message : 'Unable to save medication inventory.');
       });
   };
-  return <div className="space-y-5"><PageHeading eyebrow="Pharmacy operations" title="Medication inventory" description="Add, edit, restock, disable, or remove medicines shown in the patient Medication page." action={<button onClick={() => { setEditing(null); setShowForm(true); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Plus className="mr-1 inline h-4 w-4" /> Add medication</button>} />{showForm && <form onSubmit={save} className={`${cardClass} grid gap-4 p-5 md:grid-cols-2`}><h2 className="md:col-span-2 font-bold">{editing ? 'Edit medication' : 'Add new medication'}</h2><Field name="name" label="Medication name" defaultValue={editing?.name} required /><Field name="genericName" label="Generic name" defaultValue={editing?.genericName} required /><Field name="description" label="Description" defaultValue={editing?.description} required /><Field name="dosage" label="Dosage" defaultValue={editing?.dosage} required /><Field name="dosageForm" label="Dosage form" defaultValue={editing?.dosageForm} required /><Field name="category" label="Category" defaultValue={editing?.category} required /><Field name="price" label="Price (PHP)" type="number" step="0.01" defaultValue={editing?.price} required /><Field name="stock" label="Stock quantity" type="number" defaultValue={editing?.stock} required /><div className="flex gap-2 md:col-span-2"><button className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Check className="mr-1 inline h-4 w-4" /> Save</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold">Cancel</button></div></form>}<div className={`${cardClass} overflow-hidden`}><div className="border-b border-border p-4"><div className="relative max-w-md"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search inventory" className={`${inputClass} pl-9`} /></div></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Medication</th><th className="px-5 py-4">Category / form</th><th className="px-5 py-4">Price</th><th className="px-5 py-4">Stock</th><th className="px-5 py-4">Availability</th><th className="px-5 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(med => <tr key={med.id}><td className="px-5 py-4"><p className="font-bold">{med.name}</p><p className="text-xs text-muted-foreground">{med.genericName}</p></td><td className="px-5 py-4 text-muted-foreground">{med.category}<br />{med.dosage} · {med.form}</td><td className="px-5 py-4 font-bold">{money(med.price)}</td><td className="px-5 py-4"><input type="number" min="0" value={med.stock} onChange={e => { const stock = Number(e.target.value); onMedications(medications.map(m => m.id === med.id ? { ...m, stock, enabled: stock > 0 && m.enabled, availability: !m.enabled ? 'Disabled' : stock > 50 ? 'Available' : stock > 0 ? 'Low Stock' : 'Out of Stock' } : m)); }} className="h-8 w-20 rounded-lg border border-border bg-background px-2 text-xs" /></td><td className="px-5 py-4"><StatusBadge value={med.enabled ? med.availability : 'Disabled'} /></td><td className="px-5 py-4"><div className="flex flex-wrap gap-1.5"><button onClick={() => { setEditing(med); setShowForm(true); }} className="rounded-lg border border-border p-2 hover:bg-muted" title="Edit"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => onMedications(medications.map(m => m.id === med.id ? { ...m, enabled: !m.enabled, availability: !m.enabled ? (m.stock > 50 ? 'Available' : m.stock > 0 ? 'Low Stock' : 'Out of Stock') : 'Disabled' } : m))} className="rounded-lg border border-border px-2 py-1.5 text-[10px] font-bold">{med.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => { if (window.confirm(`Remove ${med.name}?`)) { onMedications(medications.filter(m => m.id !== med.id)); addAuditEvent('Removed medication', med.name); } }} className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button></div></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No medications match your search." />}</div></div></div>;
+  const persist = (item: AdminMedication) => {
+    void serverUpdatePharmacyMedication(item).then(({ medication }) => onMedications(medications.map(m => m.id === item.id ? medication as AdminMedication : m))).catch(error => window.alert(error instanceof Error ? error.message : 'Unable to save inventory.'));
+  };
+  return <div className="space-y-5"><PageHeading eyebrow="Pharmacy operations" title="Medication inventory" description="Add, edit, restock, disable, or remove medicines shown in the patient Medication page." action={<button onClick={() => { setEditing(null); setShowForm(true); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Plus className="mr-1 inline h-4 w-4" /> Add medication</button>} />{showForm && <form onSubmit={save} className={`${cardClass} grid gap-4 p-5 md:grid-cols-2`}><h2 className="md:col-span-2 font-bold">{editing ? 'Edit medication' : 'Add new medication'}</h2><Field name="name" label="Medication name" defaultValue={editing?.name} required /><Field name="genericName" label="Generic name" defaultValue={editing?.genericName} required /><Field name="description" label="Description" defaultValue={editing?.description} required /><Field name="dosage" label="Dosage" defaultValue={editing?.dosage} required /><Field name="dosageForm" label="Dosage form" defaultValue={editing?.dosageForm} required /><Field name="category" label="Category" defaultValue={editing?.category} required /><Field name="price" label="Price (PHP)" type="number" step="0.01" defaultValue={editing?.price} required /><Field name="stock" label="Stock quantity" type="number" defaultValue={editing?.stock} required /><div className="flex gap-2 md:col-span-2"><button className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Check className="mr-1 inline h-4 w-4" /> Save</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold">Cancel</button></div></form>}<div className={`${cardClass} overflow-hidden`}><div className="border-b border-border p-4"><div className="relative max-w-md"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search inventory" className={`${inputClass} pl-9`} /></div></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Medication</th><th className="px-5 py-4">Category / form</th><th className="px-5 py-4">Price</th><th className="px-5 py-4">Stock</th><th className="px-5 py-4">Availability</th><th className="px-5 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(med => <tr key={med.id}><td className="px-5 py-4"><p className="font-bold">{med.name}</p><p className="text-xs text-muted-foreground">{med.genericName}</p></td><td className="px-5 py-4 text-muted-foreground">{med.category}<br />{med.dosage} · {med.form}</td><td className="px-5 py-4 font-bold">{money(med.price)}</td><td className="px-5 py-4"><input type="number" min="0" value={med.stock} onChange={e => { const stock = Number(e.target.value); const next = { ...med, stock, enabled: stock > 0 && med.enabled, availability: !med.enabled ? 'Disabled' : stock > 50 ? 'Available' : stock > 0 ? 'Low Stock' : 'Out of Stock' } as AdminMedication; onMedications(medications.map(m => m.id === med.id ? next : m)); }} onBlur={e => { const stock = Number(e.currentTarget.value); persist({ ...med, stock, enabled: stock > 0 && med.enabled, availability: !med.enabled ? 'Disabled' : stock > 50 ? 'Available' : stock > 0 ? 'Low Stock' : 'Out of Stock' }); }} className="h-8 w-20 rounded-lg border border-border bg-background px-2 text-xs" /></td><td className="px-5 py-4"><StatusBadge value={med.enabled ? med.availability : 'Disabled'} /></td><td className="px-5 py-4"><div className="flex flex-wrap gap-1.5"><button onClick={() => { setEditing(med); setShowForm(true); }} className="rounded-lg border border-border p-2 hover:bg-muted" title="Edit"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => persist({ ...med, enabled: !med.enabled, availability: !med.enabled ? (med.stock > 50 ? 'Available' : med.stock > 0 ? 'Low Stock' : 'Out of Stock') : 'Disabled' })} className="rounded-lg border border-border px-2 py-1.5 text-[10px] font-bold">{med.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => { if (window.confirm(`Remove ${med.name}?`)) { void serverDeletePharmacyMedication(med.id).then(() => { onMedications(medications.filter(m => m.id !== med.id)); addAuditEvent('Removed medication', med.name); }).catch(error => window.alert(error instanceof Error ? error.message : 'Unable to remove medication.')); } }} className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button></div></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No medications match your search." />}</div></div></div>;
 }
 
 function Orders({ orders, patients, onOrders }: { orders: AdminOrder[]; patients: AdminPatient[]; onOrders: (value: AdminOrder[]) => void }) {
@@ -335,8 +345,8 @@ function Reports({ patients, payments, medications, orders }: { patients: AdminP
   return <div className="space-y-5"><PageHeading eyebrow="Insights" title="Reports" description="Operational summaries for appointments, payments, medication sales, inventory, and claims." /><div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{rows.map(([label, value, detail]) => <div key={String(label)} className={`${cardClass} p-5`}><p className="text-sm font-semibold text-muted-foreground">{label as string}</p><p className="mt-2 text-2xl font-bold text-primary">{value as string | number}</p><p className="mt-2 text-xs text-muted-foreground">{detail as string}</p></div>)}</div></div>;
 }
 
-function Audit({ events }: { events: ReturnType<typeof loadAuditEvents> }) {
-  return <div className="space-y-5"><PageHeading eyebrow="Accountability" title="Audit log" description="Important administrator actions and patient record access are recorded locally for this prototype." /><div className={`${cardClass} overflow-hidden`}><div className="divide-y divide-border">{events.length ? events.map(event => <div key={event.id} className="flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{event.action}</p><p className="text-xs text-muted-foreground">Target: {event.target} · Actor: {event.actor}</p></div><time className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleString('en-PH')}</time></div>) : <EmptyState text="No audit events yet. View a patient or update an admin record to create one." />}</div></div></div>;
+function Audit({ events }: { events: Array<{ id: string; actor: string; action: string; target: string; timestamp: string }> }) {
+  return <div className="space-y-5"><PageHeading eyebrow="Accountability" title="Audit log" description="Important administrator actions and patient record access are stored in the shared database." /><div className={`${cardClass} overflow-hidden`}><div className="divide-y divide-border">{events.length ? events.map(event => <div key={event.id} className="flex flex-col gap-2 p-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{event.action}</p><p className="text-xs text-muted-foreground">Target: {event.target} · Actor: {event.actor}</p></div><time className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleString('en-PH')}</time></div>) : <EmptyState text="No audit events yet. View a patient or update an admin record to create one." />}</div></div></div>;
 }
 
 function Field({ name, label, defaultValue, type = 'text', step, required }: { name: string; label: string; defaultValue?: string | number; type?: string; step?: string; required?: boolean }) {
@@ -440,30 +450,34 @@ function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPa
 export default function Admin() {
   const { logout } = useAuth();
   const [, setLocation] = useLocation();
-  seedAdminData();
   const [section, setSection] = useState<Section>('overview');
-  const [patients, setPatients] = useState(loadAdminPatients);
-  const [medications, setMedications] = useState(loadAdminMedications);
-  const [orders, setOrders] = useState(loadAdminOrders);
-  const [payments, setPayments] = useState(loadAdminPayments);
-  const [schedules, setSchedules] = useState(loadAdminSchedules);
-  const [events, setEvents] = useState(loadAuditEvents);
+  const [patients, setPatients] = useState<AdminPatient[]>([]);
+  const [medications, setMedications] = useState<AdminMedication[]>([]);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [schedules, setSchedules] = useState<AdminSchedule[]>([]);
+  const [events, setEvents] = useState<Array<{ id: string; actor: string; action: string; target: string; timestamp: string }>>([]);
   const [selectedPatient, setSelectedPatient] = useState<AdminPatient | null>(null);
   useEffect(() => {
     let active = true;
-    Promise.all([serverPharmacyCatalog(), serverPharmacyOrders()])
-      .then(([catalogResponse, ordersResponse]) => {
+    Promise.all([serverPharmacyCatalog(), serverPharmacyOrders(), serverAdminSchedules(), serverAuditEvents()])
+      .then(([catalogResponse, ordersResponse, schedulesResponse, auditResponse]) => {
         if (!active) return;
         setMedications(catalogResponse.medications as AdminMedication[]);
         setOrders(ordersResponse.orders as AdminOrder[]);
+        setSchedules(schedulesResponse.schedules as AdminSchedule[]);
+        setEvents(auditResponse.events);
       })
       .catch(() => {
-        // LocalStorage remains the compatibility fallback when the API is unavailable.
+        if (!active) return;
+        setMedications([]);
+        setOrders([]);
+        setSchedules([]);
+        setEvents([]);
       });
     serverPatients()
       .then(async ({ patients: remotePatients }) => {
         if (!active) return;
-        const localPatients = loadAdminPatients();
         const enriched = await Promise.all(remotePatients.map(async remote => {
           if (remote.records?.length) return remote;
           const patientId = remote.id;
@@ -479,32 +493,35 @@ export default function Admin() {
             return remote;
           }
         }));
-        const merged = enriched.length
-          ? toAdminPatients(enriched, localPatients)
-          : loadAdminPatients();
+        const merged = toAdminPatients(enriched, []);
         setPatients(merged);
         setPayments(merged.flatMap(patient => patient.clinical.payments));
-        saveAdminPatients(merged);
       })
       .catch(() => {
-        // LocalStorage remains the compatibility fallback for the prototype.
+        if (active) {
+          setPatients([]);
+          setPayments([]);
+        }
       });
     return () => {
       active = false;
     };
   }, []);
   const appointments = useMemo(() => patients.flatMap(p => p.clinical.appointments), [patients]);
-  const updatePatients = (value: AdminPatient[]) => { setPatients(value); saveAdminPatients(value); setEvents(loadAuditEvents()); };
-  const updateMedications = (value: AdminMedication[]) => { setMedications(value); saveAdminMedications(value); setEvents(loadAuditEvents()); };
-  const updateOrders = (value: AdminOrder[]) => { setOrders(value); saveAdminOrders(value); setEvents(loadAuditEvents()); };
-  const updatePayments = (value: AdminPayment[]) => { setPayments(value); saveAdminPayments(value); setEvents(loadAuditEvents()); };
-  const updateSchedules = (value: AdminSchedule[]) => { setSchedules(value); saveAdminSchedules(value); setEvents(loadAuditEvents()); };
+  const updatePatients = (value: AdminPatient[]) => { setPatients(value); };
+  const updateMedications = (value: AdminMedication[]) => { setMedications(value); };
+  const updateOrders = (value: AdminOrder[]) => { setOrders(value); };
+  const updatePayments = (value: AdminPayment[]) => { setPayments(value); };
+  const updateSchedules = (value: AdminSchedule[]) => {
+    setSchedules(value);
+    void serverSaveAdminSchedules(value).then(({ schedules: saved }) => setSchedules(saved as AdminSchedule[])).catch(() => undefined);
+  };
   const handleLogout = () => { logout(); setLocation('/login'); };
   const content = selectedPatient ? <PatientProfile patient={selectedPatient} payments={payments} orders={orders} onBack={() => setSelectedPatient(null)} onUpdate={patient => { updatePatients(patients.map(p => p.id === patient.id ? patient : p)); setSelectedPatient(patient); }} /> :
     section === 'overview' ? <Overview patients={patients} appointments={appointments} payments={payments} medications={medications} orders={orders} /> :
     section === 'patients' ? <Patients patients={patients} onSelect={setSelectedPatient} onUpdate={patient => updatePatients(patients.map(p => p.id === patient.id ? patient : p))} /> :
     section === 'appointments' ? <Appointments patients={patients} schedules={schedules} onSchedules={updateSchedules} onPatients={updatePatients} /> :
-    section === 'payments' ? <Payments payments={payments} onPayments={updatePayments} /> :
+    section === 'payments' ? <Payments payments={payments} /> :
     section === 'medications' ? <Medications medications={medications} onMedications={updateMedications} /> :
     section === 'orders' ? <Orders orders={orders} patients={patients} onOrders={updateOrders} /> :
     section === 'claims' ? <Claims patients={patients} onPatients={updatePatients} /> :

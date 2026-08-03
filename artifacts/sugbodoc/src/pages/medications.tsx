@@ -9,12 +9,10 @@ import { useToast } from '@/hooks/use-toast';
 import {
   calculateInsuranceEstimate,
   createOrUpdateClaim,
-  loadInsurance,
 } from '@/lib/insurance';
 import {
   LEGACY_MEDICATION_ORDER_STORAGE_KEY,
   PHARMACY_ORDER_STORAGE_KEY,
-  loadAdminMedications,
   type AdminMedication,
 } from '@/lib/admin';
 import { getLatestPatientEncounter } from '@/lib/encounters';
@@ -58,17 +56,21 @@ function safeJSONParse<T>(str: string | null, fallback: T): T {
 
 export default function Medications() {
   const { toast } = useToast();
-  const currentUser = useMemo(() => safeJSONParse<{ id?: string; email?: string; name?: string; phone?: string } | null>(localStorage.getItem('sugbodoc_current_user'), null), []);
+  const currentUser = useMemo(() => safeJSONParse<{
+    id?: string;
+    email?: string;
+    name?: string;
+    phone?: string;
+    insurance?: Record<string, unknown> | null;
+    claims?: Record<string, unknown>[];
+  } | null>(sessionStorage.getItem('sugbodoc_current_user'), null), []);
 
   const [activeTab, setActiveTab] = useState<'shop' | 'cart' | 'orders'>('shop');
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
   
-  const [cartItems, setCartItems] = useState<any[]>(() => safeJSONParse(localStorage.getItem('sugbodoc_medication_cart'), []));
-  const [orders, setOrders] = useState<any[]>(() => safeJSONParse(
-    localStorage.getItem(PHARMACY_ORDER_STORAGE_KEY) ?? localStorage.getItem(LEGACY_MEDICATION_ORDER_STORAGE_KEY),
-    [],
-  ));
+  const [cartItems, setCartItems] = useState<any[]>(() => safeJSONParse(sessionStorage.getItem('sugbodoc_medication_cart'), []));
+  const [orders, setOrders] = useState<any[]>([]);
   
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [isLoadingPayment, setIsLoadingPayment] = useState(false);
@@ -76,12 +78,12 @@ export default function Medications() {
 
   const [fulfillmentMode, setFulfillmentMode] = useState<'delivery' | 'pickup'>('delivery');
   const [deliveryForm, setDeliveryForm] = useState(() => safeJSONParse(
-    localStorage.getItem('sugbodoc_medication_checkout_details'),
+    sessionStorage.getItem('sugbodoc_medication_checkout_details'),
     { recipientName: currentUser?.name || '', phone: currentUser?.phone || '', address: '' },
   ));
   const [pickupLocation, setPickupLocation] = useState(PARTNER_LOCATIONS[0]);
-  const insurance = useMemo(() => loadInsurance(), []);
-  const [catalog, setCatalog] = useState<AdminMedication[]>(() => loadAdminMedications());
+  const insurance = useMemo(() => currentUser?.insurance as Parameters<typeof calculateInsuranceEstimate>[1], [currentUser]);
+  const [catalog, setCatalog] = useState<AdminMedication[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -91,7 +93,7 @@ export default function Medications() {
     const refreshCatalog = () => {
       void serverPharmacyCatalog().then(({ medications }) => {
         if (active) setCatalog(medications as AdminMedication[]);
-      }).catch(() => setCatalog(loadAdminMedications()));
+      }).catch(() => undefined);
     };
     window.addEventListener('storage', refreshCatalog);
     return () => {
@@ -110,18 +112,17 @@ export default function Medications() {
     };
   }, []);
 
-  // Sync to localStorage
+  // Cart and checkout details are temporary tab-local UI state.
   useEffect(() => {
-    localStorage.setItem('sugbodoc_medication_cart', JSON.stringify(cartItems));
+    sessionStorage.setItem('sugbodoc_medication_cart', JSON.stringify(cartItems));
   }, [cartItems]);
 
   useEffect(() => {
-    localStorage.setItem(PHARMACY_ORDER_STORAGE_KEY, JSON.stringify(orders));
-    localStorage.setItem(LEGACY_MEDICATION_ORDER_STORAGE_KEY, JSON.stringify(orders));
+    // Orders are authoritative in PostgreSQL; do not mirror them into browser storage.
   }, [orders]);
 
   useEffect(() => {
-    localStorage.setItem('sugbodoc_medication_checkout_details', JSON.stringify(deliveryForm));
+    sessionStorage.setItem('sugbodoc_medication_checkout_details', JSON.stringify(deliveryForm));
   }, [deliveryForm]);
 
   // Payment Result Verification
@@ -166,7 +167,7 @@ export default function Medications() {
             };
             createdAt: string;
             status: string;
-          } | null>(localStorage.getItem('sugbodoc_medication_checkout_draft'), null);
+          } | null>(sessionStorage.getItem('sugbodoc_medication_checkout_draft'), null);
           if (!draft) {
             throw new Error('Order details could not be recovered. Your payment was received; please contact support.');
           }
@@ -199,7 +200,8 @@ export default function Medications() {
           });
 
           setCartItems([]);
-          createOrUpdateClaim({
+          const existingClaims = (currentUser?.claims ?? []) as any[];
+          const newClaim = createOrUpdateClaim({
             relatedType: 'medication',
             relatedId: result.medicationOrderId,
             relatedLabel: `Pharmacy order ${result.medicationOrderId}`,
@@ -208,9 +210,12 @@ export default function Medications() {
             patientBalance: draft.totals.patientMedicationBalance ?? draft.totals.total - draft.totals.deliveryFee,
             status: 'Processing',
             provider: insurance?.provider ?? 'Testing estimate',
-          });
-          void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
-          localStorage.removeItem('sugbodoc_medication_checkout_draft');
+          }, existingClaims);
+          const nextClaims = existingClaims.some(claim => claim.relatedType === newClaim.relatedType && claim.relatedId === newClaim.relatedId)
+            ? existingClaims
+            : [newClaim, ...existingClaims];
+          void serverUpdateMe({ claims: nextClaims });
+          sessionStorage.removeItem('sugbodoc_medication_checkout_draft');
           setActiveTab('orders');
           toast({ title: 'Pharmacy order successful', description: 'Your pharmacy order has been placed and is now pending fulfillment.' });
           
@@ -314,7 +319,7 @@ export default function Medications() {
         createdAt: new Date().toISOString(),
         status: 'Pending',
       };
-      localStorage.setItem('sugbodoc_medication_checkout_draft', JSON.stringify(orderPayload));
+      sessionStorage.setItem('sugbodoc_medication_checkout_draft', JSON.stringify(orderPayload));
 
       const appBase = `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`;
       

@@ -131,8 +131,9 @@ export function updateClaimStatus(
 
 export function createOrUpdateClaim(
   claim: Omit<InsuranceClaim, 'id' | 'reference' | 'date'>,
+  sourceClaims?: InsuranceClaim[],
 ) {
-  const current = loadClaims();
+  const current = sourceClaims ?? loadClaims();
   const existing = current.find(
     item => item.relatedType === claim.relatedType && item.relatedId === claim.relatedId,
   );
@@ -144,7 +145,7 @@ export function createOrUpdateClaim(
     reference: `CLM-${Math.floor(100000 + Math.random() * 900000)}`,
     date: new Date().toISOString(),
   };
-  saveClaims([created, ...current]);
+  if (!sourceClaims) saveClaims([created, ...current]);
   return created;
 }
 

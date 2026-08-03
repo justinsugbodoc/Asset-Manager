@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { upcomingAppointments, pastAppointments, specialties, doctors } from '@/data/mock';
+import { specialties, doctors } from '@/data/mock';
 import { Calendar as CalendarIcon, Clock, MapPin, User, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
+import { calculateInsuranceEstimate, createOrUpdateClaim } from '@/lib/insurance';
+import { getCurrentSessionUser } from '@/hooks/use-auth';
 import type { Encounter } from '@/lib/encounters';
 import { serverAppointments, serverCreateAppointment, serverRecords, serverUpdateAppointmentStatus, serverUpdateMe } from '@/lib/server';
 
@@ -27,33 +28,11 @@ type Appointment = {
   };
 };
 
-// ─── localStorage helpers ─────────────────────────────────────────────────────
-
-const STORAGE_KEY = 'sugbodoc_appointments';
-const USER_KEY = 'sugbodoc_current_user';
 const MOCK_APPOINTMENT_FEE = 800;
-
-function loadAppointments(): Appointment[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as Appointment[];
-  } catch {
-    // ignore
-  }
-  return upcomingAppointments;
-}
-
-function saveAppointments(apts: Appointment[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(apts));
-  } catch {
-    // ignore
-  }
-}
 
 function getCurrentUser(): { name: string; email: string } | null {
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = sessionStorage.getItem('sugbodoc_current_user');
     if (raw) return JSON.parse(raw) as { name: string; email: string };
   } catch {
     // ignore
@@ -84,7 +63,8 @@ export default function Appointments() {
   const [selectedTime, setSelectedTime] = useState('');
 
   const { toast } = useToast();
-  const insurance = loadInsurance();
+  const sessionUser = getCurrentSessionUser();
+  const insurance = sessionUser?.insurance as Parameters<typeof calculateInsuranceEstimate>[1];
   const appointmentEstimate = calculateInsuranceEstimate(MOCK_APPOINTMENT_FEE, insurance, 'appointment');
 
   // Load persisted appointments on mount
@@ -95,7 +75,6 @@ export default function Appointments() {
         const response = await serverAppointments();
         if (active) {
           setLocalAppointments(response.appointments as Appointment[]);
-          saveAppointments(response.appointments as Appointment[]);
         }
         try {
           const records = await serverRecords();
@@ -104,7 +83,7 @@ export default function Appointments() {
           if (active) setCompletedEncounters([]);
         }
       } catch {
-        if (active) setLocalAppointments(loadAppointments());
+        if (active) setLocalAppointments([]);
       } finally {
         if (active) setLoading(false);
       }
@@ -124,15 +103,18 @@ export default function Appointments() {
   };
 
   const cancelAppointment = (id: string) => {
-    const updated = localAppointments.filter(apt => apt.id !== id);
-    setLocalAppointments(updated);
-    saveAppointments(updated);
-    void serverUpdateAppointmentStatus(id, 'Cancelled').catch(() => undefined);
-    toast({
-      title: 'Appointment Cancelled',
-      description: 'Your appointment has been successfully cancelled.',
+    void serverUpdateAppointmentStatus(id, 'Cancelled').then(({ appointment }) => {
+      setLocalAppointments(current => current.map(item => item.id === id ? appointment as Appointment : item));
+      toast({
+        title: 'Appointment Cancelled',
+        description: 'Your appointment has been successfully cancelled.',
+        variant: 'destructive',
+      });
+    }).catch(error => toast({
+      title: 'Unable to cancel appointment',
+      description: error instanceof Error ? error.message : 'Please try again.',
       variant: 'destructive',
-    });
+    }));
   };
 
   const resetBooking = () => {
@@ -165,23 +147,18 @@ export default function Appointments() {
         billing,
       });
       newApt = response.appointment as Appointment;
-    } catch {
-      // Preserve the existing prototype path if the shared API is unavailable.
-      newApt = {
-        id: `apt_${Date.now()}`,
-        date: selectedDate,
-        time: selectedTime,
-        doctor: selectedDoctor,
-        status: 'Pending',
-        reference: generateReference(),
-        emailStatus: 'pending',
-        billing,
-      };
+    } catch (error) {
+      setIsConfirming(false);
+      toast({
+        title: 'Unable to book appointment',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+      return;
     }
 
     const updated = [newApt, ...localAppointments];
     setLocalAppointments(updated);
-    saveAppointments(updated);
     const reference = newApt.reference ?? generateReference();
 
     // 2. Attempt email through the server.
@@ -225,8 +202,8 @@ export default function Appointments() {
         : apt,
     );
     setLocalAppointments(finalAppointments);
-    saveAppointments(finalAppointments);
-    createOrUpdateClaim({
+    const existingClaims = (sessionUser?.claims ?? []) as any[];
+    const newClaim = createOrUpdateClaim({
       relatedType: 'appointment',
       relatedId: reference,
       relatedLabel: `${selectedDoctor.name} · ${selectedDate}`,
@@ -235,8 +212,11 @@ export default function Appointments() {
       patientBalance: appointmentEstimate.patientBalance,
       status: 'Processing',
       provider: insurance?.provider ?? 'Testing estimate',
-    });
-    void serverUpdateMe({ claims: JSON.parse(localStorage.getItem('sugbodoc_insurance_claims') ?? '[]') });
+    }, existingClaims);
+    const nextClaims = existingClaims.some(claim => claim.relatedType === newClaim.relatedType && claim.relatedId === newClaim.relatedId)
+      ? existingClaims
+      : [newClaim, ...existingClaims];
+    void serverUpdateMe({ claims: nextClaims });
 
     setIsConfirming(false);
     resetBooking();
@@ -249,8 +229,11 @@ export default function Appointments() {
     });
   };
 
-  const appointmentsList: Appointment[] =
-    activeTab === 'upcoming' ? localAppointments : (pastAppointments as Appointment[]);
+  const appointmentsList: Appointment[] = localAppointments.filter(appointment =>
+    activeTab === 'upcoming'
+      ? !['Completed', 'Cancelled'].includes(appointment.status)
+      : ['Completed', 'Cancelled'].includes(appointment.status),
+  );
   return (
     <AppShell title="Appointments">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">

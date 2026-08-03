@@ -28,8 +28,8 @@ class RuntimeErrorBoundary extends Component<
 
   handleReset = () => {
     try {
-      window.localStorage.removeItem('sugbodoc_auth_token');
-      window.localStorage.removeItem('sugbodoc_current_user');
+      window.sessionStorage.removeItem('sugbodoc_auth_token');
+      window.sessionStorage.removeItem('sugbodoc_current_user');
     } catch {
       // The recovery screen remains usable even if storage is unavailable.
     }
