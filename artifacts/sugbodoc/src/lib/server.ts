@@ -157,6 +157,33 @@ export function serverUpdatePatientEncounterData(
   );
 }
 
+export function serverConfirmBillPayment(sessionId: string) {
+  return request<{
+    bills: any[];
+    payments: any[];
+    receiptId: string;
+    status: string;
+  }>('/stripe/confirm-bill-payment', {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
+export function serverCreateBillCheckout(input: {
+  billId: string;
+  billIds: string[];
+  description: string;
+  amount: number;
+  insuranceCoverageAmount: number;
+  successUrl: string;
+  cancelUrl: string;
+}) {
+  return request<{ checkoutUrl: string; sessionId: string }>('/stripe/create-checkout-session', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export type ServerMedication = {
   id: string;
   name: string;

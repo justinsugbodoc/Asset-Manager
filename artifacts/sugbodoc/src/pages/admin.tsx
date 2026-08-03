@@ -131,10 +131,10 @@ function PatientProfile({ patient, payments, orders, onBack, onUpdate }: { patie
   const [selectedEncounterId, setSelectedEncounterId] = useState(patientEncounters[0]?.id ?? '');
   const selectedEncounter = patientEncounters.find(item => item.id === selectedEncounterId) ?? patientEncounters[0];
   const encounterBills = selectedEncounter
-    ? patient.clinical.bills.filter((bill: any) => selectedEncounter.billing.relatedBillIds.includes(bill.id))
+    ? patient.clinical.bills.filter((bill: any) => (selectedEncounter.billing?.relatedBillIds ?? []).includes(bill.id))
     : patient.clinical.bills;
   const encounterPayments = selectedEncounter
-    ? selectedEncounter.billing.payments
+    ? selectedEncounter.billing?.payments ?? []
     : payments.filter(payment => payment.patientId === patient.id);
   const tabs: Array<[PatientTab, string]> = [['overview', 'Overview'], ['appointments', 'Appointments'], ['clinical', 'Clinical records'], ['prescriptions', 'Prescriptions'], ['labs', 'Lab results'], ['billing', 'Bills & payments'], ['pharmacy', 'Pharmacy Orders'], ['insurance', 'Insurance & claims']];
   const editSoapNote = async (note: any) => {
@@ -414,6 +414,18 @@ function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPa
         claims: remote.claims ?? clinical.claims,
         appointments: remote.appointments,
         encounters: sharedEncounters,
+        bills: sharedEncounters.flatMap((item: any) => (item.bills ?? []).map((bill: any) => ({
+          ...bill,
+          encounterId: bill.encounterId ?? item.id,
+          encounterReference: bill.encounterReference ?? item.encounterReference,
+        }))),
+        payments: sharedEncounters.flatMap((item: any) => (item.payments ?? item.billing?.payments ?? []).map((payment: any) => ({
+          ...payment,
+          patientId: remote.id,
+          encounterId: payment.encounterId ?? item.id,
+          encounterReference: payment.encounterReference ?? item.encounterReference,
+          patientName: remote.name,
+        }))),
         soapNotes: sharedEncounters.flatMap((item: any) => item.soapNotes ?? []),
         imaging: sharedEncounters.flatMap((item: any) => item.imaging ?? []),
         vitals: sharedEncounters.flatMap((item: any) => item.vitals ?? []),
@@ -471,6 +483,7 @@ export default function Admin() {
           ? toAdminPatients(enriched, localPatients)
           : loadAdminPatients();
         setPatients(merged);
+        setPayments(merged.flatMap(patient => patient.clinical.payments));
         saveAdminPatients(merged);
       })
       .catch(() => {

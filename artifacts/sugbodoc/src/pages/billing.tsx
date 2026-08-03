@@ -5,8 +5,8 @@ import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, External
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
 import { getCurrentSessionUser } from '@/hooks/use-auth';
-import { getLatestPatientEncounter, linkBillingRecordToEncounter } from '@/lib/encounters';
-import { serverRecords, serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
+import { getLatestPatientEncounter } from '@/lib/encounters';
+import { serverConfirmBillPayment, serverCreateBillCheckout, serverRecords, serverUpdateMe } from '@/lib/server';
 
 export default function Billing() {
   const currentUser = getCurrentSessionUser();
@@ -31,7 +31,17 @@ export default function Billing() {
         })),
       );
       if (active) {
-        setBills(sharedBills.length ? sharedBills.filter((bill: any) => bill.status !== 'Paid') : mockBills);
+        if (sharedBills.length) {
+          setBills(sharedBills.filter((bill: any) => bill.status !== 'Paid'));
+          setHistory(sharedBills.filter((bill: any) => bill.status === 'Paid'));
+        } else {
+          setBills(mockBills);
+          setHistory(pastBills.map(bill => ({
+            ...bill,
+            encounterId: activeEncounter?.id,
+            encounterReference: activeEncounter?.encounterReference,
+          })));
+        }
       }
     }).catch(() => {
       if (active) setBills(mockBills);
@@ -48,89 +58,41 @@ export default function Billing() {
 
     const verifyPayment = async () => {
       try {
-        const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
-        const response = await fetch(`${base}/api/stripe/checkout-session/${encodeURIComponent(sessionId)}`);
-        const result = await response.json() as {
-          status?: string;
-          billId?: string;
-          error?: string;
-        };
+        const confirmed = await serverConfirmBillPayment(sessionId);
+        const paidBills = confirmed.bills.map((bill: any) => ({
+          ...bill,
+          status: 'Paid',
+          receiptId: bill.receiptId ?? confirmed.receiptId,
+          encounterId: bill.encounterId ?? activeEncounter?.id,
+          encounterReference: bill.encounterReference ?? activeEncounter?.encounterReference,
+        }));
+        const paidBillIds = new Set(paidBills.map((bill: any) => String(bill.id)));
+        setBills((current) => current.filter((bill) => !paidBillIds.has(String(bill.id))));
+        setHistory((current) => [
+          ...paidBills,
+          ...current.filter((bill: any) => !paidBillIds.has(String(bill.id))),
+        ]);
 
-        if (!response.ok || result.status !== 'paid' || !result.billId) {
-          throw new Error(result.error ?? 'Payment has not been confirmed');
-        }
-
-        const billsToMarkPaid = result.billId === 'all-bills'
-          ? bills
-          : bills.filter((bill) => bill.id === result.billId);
-        if (billsToMarkPaid.length > 0) {
-          setBills((current) => current.filter((bill) => !billsToMarkPaid.some((paid) => paid.id === bill.id)));
-          const draft = (() => {
-            try {
-              const raw = localStorage.getItem('sugbodoc_billing_checkout_draft');
-              return raw ? JSON.parse(raw) as {
-                originalAmount: number;
-                estimatedCoverage: number;
-                patientBalance: number;
-                provider: string;
-              } : null;
-            } catch {
-              return null;
-            }
-          })();
-          const paidOriginalAmount = draft?.originalAmount ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0);
-          const paidEstimatedCoverage = draft?.estimatedCoverage ?? 0;
-          setHistory((current) => [
-            ...billsToMarkPaid.map((bill) => ({
-              ...bill,
-              encounterId: bill.encounterId ?? activeEncounter?.id,
-              encounterReference: bill.encounterReference ?? activeEncounter?.encounterReference,
-              status: 'Paid',
-              receiptId: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
-              originalAmount: billsToMarkPaid.length === 1 ? paidOriginalAmount : bill.amount,
-              estimatedInsuranceCoverage: billsToMarkPaid.length === 1
-                ? paidEstimatedCoverage
-                : calculateInsuranceEstimate(bill.amount, insurance, 'bill').estimatedCoverage,
-              patientBalance: billsToMarkPaid.length === 1
-                ? draft?.patientBalance ?? bill.amount
-                : calculateInsuranceEstimate(bill.amount, insurance, 'bill').patientBalance,
-            })),
-            ...current,
-          ]);
-          billsToMarkPaid.forEach(bill => {
-            const localEncounter = linkBillingRecordToEncounter(
-            bill,
-            {
-              id: `${bill.id}_payment`,
-              amount: bill.amount,
-              status: 'Paid',
-              reference: `STRIPE-${sessionId.slice(-8).toUpperCase()}`,
-              date: new Date().toISOString().slice(0, 10),
-            },
-            currentUser?.id,
-            currentUser?.name,
-            );
-            if (localEncounter?.id) {
-              void serverUpdatePatientEncounterData(localEncounter.id, {
-                bills: [bill],
-                payments: localEncounter.billing?.payments ?? [],
-                billing: localEncounter.billing,
-              }).catch(() => {
-                toast({
-                  title: 'Payment saved locally',
-                  description: 'The shared billing record could not be updated yet.',
-                  variant: 'destructive',
-                });
-              });
-            }
-          });
+        const draft = (() => {
+          try {
+            const raw = localStorage.getItem('sugbodoc_billing_checkout_draft');
+            return raw ? JSON.parse(raw) as {
+              originalAmount: number;
+              estimatedCoverage: number;
+              patientBalance: number;
+              provider: string;
+            } : null;
+          } catch {
+            return null;
+          }
+        })();
           createOrUpdateClaim({
             relatedType: 'bill',
-            relatedId: result.billId,
+            relatedId: paidBillIds.size === 1 ? String([...paidBillIds][0]) : 'all-bills',
             relatedLabel: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
-            originalAmount: draft?.originalAmount ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0),
+            originalAmount: draft?.originalAmount ?? paidBills.reduce((sum, bill) => sum + Number(bill.amount ?? 0), 0),
             estimatedCoverage: draft?.estimatedCoverage ?? 0,
-            patientBalance: draft?.patientBalance ?? billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0),
+            patientBalance: draft?.patientBalance ?? paidBills.reduce((sum, bill) => sum + Number(bill.amount ?? 0), 0),
             status: 'Processing',
             provider: draft?.provider ?? insurance?.provider ?? 'Testing estimate',
           });
@@ -138,11 +100,8 @@ export default function Billing() {
           localStorage.removeItem('sugbodoc_billing_checkout_draft');
           toast({
             title: 'Payment Successful',
-            description: `Successfully paid ${formatMoney(billsToMarkPaid.reduce((sum, bill) => sum + bill.amount, 0))} through Stripe.`,
+            description: `Successfully paid ${formatMoney(paidBills.reduce((sum, bill) => sum + Number(bill.amount ?? 0), 0))} through Stripe.`,
           });
-        } else {
-          toast({ title: 'Payment Confirmed', description: 'Your Stripe payment was received.' });
-        }
       } catch (error) {
         toast({
           title: 'Payment Verification Pending',
@@ -178,25 +137,17 @@ export default function Billing() {
       const originalAmount = billsToPay.reduce((sum, bill) => sum + bill.amount, 0);
       const estimate = calculateInsuranceEstimate(originalAmount, insurance, 'bill');
       const total = estimate.patientBalance;
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
       const appBase = `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`;
-      const response = await fetch(`${base}/api/stripe/create-checkout-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          billId: selectedBill?.id ?? 'all-bills',
-          description: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
-          amount: total,
-          insuranceCoverageAmount: estimate.estimatedCoverage,
-          patientEmail: currentUser?.email,
-          successUrl: `${appBase}billing?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${appBase}billing?payment=cancelled`,
-        }),
+      const result = await serverCreateBillCheckout({
+        billId: selectedBill?.id ?? 'all-bills',
+        billIds: billsToPay.map(bill => String(bill.id)),
+        description: selectedBill?.description ?? 'SugboDoc Outstanding Bills',
+        amount: total,
+        insuranceCoverageAmount: estimate.estimatedCoverage,
+        successUrl: `${appBase}billing?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${appBase}billing?payment=cancelled`,
       });
-      const result = await response.json() as { checkoutUrl?: string; error?: string };
-      if (!response.ok || !result.checkoutUrl) {
-        throw new Error(result.error ?? 'Unable to start Stripe Checkout');
-      }
+      if (!result.checkoutUrl) throw new Error('Unable to start Stripe Checkout');
       localStorage.setItem('sugbodoc_billing_checkout_draft', JSON.stringify({
         billIds: billsToPay.map(bill => bill.id),
         originalAmount,

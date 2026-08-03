@@ -1,6 +1,9 @@
 import { Router } from "express";
 import Stripe from "stripe";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { db, clinicalRecordsTable } from "@workspace/db";
+import { getUserFromRequest } from "../lib/sugbodoc-auth";
 
 const router = Router();
 
@@ -14,6 +17,7 @@ function getStripe(): Stripe {
 
 const checkoutSchema = z.object({
   billId: z.string().min(1),
+  billIds: z.array(z.string().min(1)).min(1).max(100).optional(),
   description: z.string().min(1).max(200),
   amount: z.number().finite().positive().max(1_000_000),
   insuranceCoverageAmount: z.number().finite().min(0).optional().default(0),
@@ -21,6 +25,21 @@ const checkoutSchema = z.object({
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
 });
+
+const confirmPaymentSchema = z.object({
+  sessionId: z.string().regex(/^cs_[A-Za-z0-9_]+$/),
+});
+
+function paymentReference(sessionId: string) {
+  return `STRIPE-${sessionId.slice(-8).toUpperCase()}`;
+}
+
+async function getPatientBillRecords(patientId: string) {
+  return db.select().from(clinicalRecordsTable).where(and(
+    eq(clinicalRecordsTable.patientId, patientId),
+    eq(clinicalRecordsTable.recordType, "bills"),
+  ));
+}
 
 const medicationCatalog = [
   { id: "med-001", name: "Biogesic", dosage: "500mg", form: "Tablet", price: 7.5, stock: 150 },
@@ -165,6 +184,11 @@ router.post("/stripe/create-medication-checkout-session", async (req, res) => {
 });
 
 router.post("/stripe/create-checkout-session", async (req, res) => {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: "Not signed in." });
+    return;
+  }
   const parsed = checkoutSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -176,6 +200,17 @@ router.post("/stripe/create-checkout-session", async (req, res) => {
 
   try {
     const data = parsed.data;
+    const requestedBillIds = data.billIds ?? (data.billId === "all-bills" ? [] : [data.billId]);
+    const billRecords = await getPatientBillRecords(user.id);
+    const patientBills = billRecords.map(record => record.data as Record<string, any>);
+    const billIds = requestedBillIds.length
+      ? requestedBillIds
+      : patientBills.filter(bill => bill.status !== "Paid").map(bill => String(bill.id));
+    const ownedBills = patientBills.filter(bill => billIds.includes(String(bill.id)) && bill.status !== "Paid");
+    if (!ownedBills.length) {
+      res.status(404).json({ error: "No unpaid database bills were found for this patient." });
+      return;
+    }
     const stripe = getStripe();
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -189,10 +224,12 @@ router.post("/stripe/create-checkout-session", async (req, res) => {
           quantity: 1,
         },
       ],
-      customer_email: data.patientEmail,
-      client_reference_id: data.billId,
+      customer_email: user.email,
+      client_reference_id: billIds.length === 1 ? billIds[0] : "all-bills",
        metadata: {
-         billId: data.billId,
+         billId: billIds.length === 1 ? billIds[0] : "all-bills",
+         billIds: billIds.join(","),
+         patientId: user.id,
          insuranceCoverageAmount: data.insuranceCoverageAmount.toFixed(2),
        },
       success_url: data.successUrl,
@@ -207,6 +244,134 @@ router.post("/stripe/create-checkout-session", async (req, res) => {
     res.json({ checkoutUrl: session.url, sessionId: session.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to create checkout session";
+    res.status(502).json({ error: message });
+  }
+});
+
+router.post("/stripe/confirm-bill-payment", async (req, res) => {
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    res.status(401).json({ error: "Not signed in." });
+    return;
+  }
+  const parsed = confirmPaymentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "A valid Stripe checkout session is required." });
+    return;
+  }
+
+  try {
+    const session = await getStripe().checkout.sessions.retrieve(parsed.data.sessionId);
+    if (session.payment_status !== "paid") {
+      res.status(400).json({ error: "Payment has not been confirmed by Stripe." });
+      return;
+    }
+    if (session.metadata?.patientId && session.metadata.patientId !== user.id) {
+      res.status(403).json({ error: "This payment session does not belong to the signed-in patient." });
+      return;
+    }
+
+    const metadataIds = session.metadata?.billIds?.split(",").filter(Boolean) ?? [];
+    const requestedIds = metadataIds.length
+      ? metadataIds
+      : [session.metadata?.billId ?? session.client_reference_id ?? ""].filter(Boolean);
+    const records = await getPatientBillRecords(user.id);
+    const selected = records.filter(record => requestedIds.includes(String((record.data as any).id)));
+    if (!selected.length) {
+      const alreadyPaid = records
+        .filter(record => requestedIds.includes(String((record.data as any).id)) && (record.data as any).status === "Paid")
+        .map(record => record.data as Record<string, any>);
+      if (alreadyPaid.length) {
+        res.json({
+          bills: alreadyPaid,
+          payments: [],
+          receiptId: paymentReference(parsed.data.sessionId),
+          status: "Paid",
+        });
+        return;
+      }
+      res.status(404).json({ error: "The paid bills could not be found for this patient." });
+      return;
+    }
+
+    const receipt = paymentReference(parsed.data.sessionId);
+    const paidAt = new Date().toISOString();
+    const paidBills: Record<string, any>[] = [];
+    const payments: Record<string, any>[] = [];
+
+    await db.transaction(async tx => {
+      for (const record of selected) {
+        const bill = record.data as Record<string, any>;
+        const paidBill = {
+          ...bill,
+          status: "Paid",
+          receiptId: receipt,
+          paidAt,
+        };
+        await tx.update(clinicalRecordsTable).set({
+          data: paidBill,
+          updatedAt: new Date(),
+        }).where(eq(clinicalRecordsTable.id, record.id));
+
+        const payment = {
+          id: `${String(bill.id)}_payment`,
+          billId: bill.id,
+          encounterId: record.encounterId,
+          amount: selected.length === 1 ? (session.amount_total ?? Math.round(Number(bill.amount ?? 0) * 100)) / 100 : Number(bill.amount ?? 0),
+          status: "Paid",
+          reference: receipt,
+          date: paidAt.slice(0, 10),
+          description: bill.description ?? "SugboDoc bill payment",
+          stripeSessionId: parsed.data.sessionId,
+        };
+        await tx.insert(clinicalRecordsTable).values({
+          id: `cr_${record.encounterId}_payments_${String(bill.id)}_payment`.replace(/[^a-zA-Z0-9_-]/g, "_"),
+          patientId: user.id,
+          encounterId: record.encounterId,
+          recordType: "payments",
+          data: payment,
+        }).onConflictDoUpdate({
+          target: clinicalRecordsTable.id,
+          set: { data: payment, updatedAt: new Date() },
+        });
+
+        const billingRows = await tx.select().from(clinicalRecordsTable).where(and(
+          eq(clinicalRecordsTable.patientId, user.id),
+          eq(clinicalRecordsTable.encounterId, record.encounterId),
+          eq(clinicalRecordsTable.recordType, "billing"),
+        ));
+        const billingData = (billingRows[0]?.data ?? {}) as Record<string, any>;
+        const existingPayments = Array.isArray(billingData.payments) ? billingData.payments : [];
+        const nextBilling = {
+          ...billingData,
+          relatedBillIds: Array.from(new Set([...(billingData.relatedBillIds ?? []), bill.id])),
+          payments: [...existingPayments.filter((item: any) => item.id !== payment.id), payment],
+        };
+        if (billingRows[0]) {
+          await tx.update(clinicalRecordsTable).set({
+            data: nextBilling,
+            updatedAt: new Date(),
+          }).where(eq(clinicalRecordsTable.id, billingRows[0].id));
+        } else {
+          await tx.insert(clinicalRecordsTable).values({
+            id: `cr_${record.encounterId}_billing`.replace(/[^a-zA-Z0-9_-]/g, "_"),
+            patientId: user.id,
+            encounterId: record.encounterId,
+            recordType: "billing",
+            data: nextBilling,
+          }).onConflictDoUpdate({
+            target: clinicalRecordsTable.id,
+            set: { data: nextBilling, updatedAt: new Date() },
+          });
+        }
+        paidBills.push(paidBill);
+        payments.push(payment);
+      }
+    });
+
+    res.json({ bills: paidBills, payments, receiptId: receipt, status: "Paid" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to confirm bill payment";
     res.status(502).json({ error: message });
   }
 });
