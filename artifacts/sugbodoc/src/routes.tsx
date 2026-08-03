@@ -19,12 +19,16 @@ import Admin from '@/pages/admin';
 function ProtectedRoute({ component: Component, ...rest }: any) {
   const { token } = useAuth();
   const [, setLocation] = useLocation();
+  const user = getCurrentSessionUser();
+  const isStaff = user?.role === 'Admin' || user?.role === 'Clinician';
 
   useEffect(() => {
     if (!token) {
       setLocation('/login');
+    } else if (isStaff) {
+      setLocation('/admin');
     }
-  }, [token, setLocation]);
+  }, [token, isStaff, setLocation]);
 
   if (!token) {
     return (
@@ -32,6 +36,17 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
           <p className="mt-3 text-sm text-muted-foreground">Opening sign in…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isStaff) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
+          <p className="mt-3 text-sm text-muted-foreground">Opening the admin portal…</p>
         </div>
       </div>
     );
