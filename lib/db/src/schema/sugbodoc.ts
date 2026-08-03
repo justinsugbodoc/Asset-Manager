@@ -1,5 +1,5 @@
 import { createInsertSchema } from "drizzle-zod";
-import { jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
 
 export const usersTable = pgTable("sugbodoc_users", {
@@ -62,6 +62,33 @@ export const clinicalRecordsTable = pgTable("sugbodoc_clinical_records", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const pharmacyMedicationsTable = pgTable("sugbodoc_pharmacy_medications", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  genericName: text("generic_name").notNull().default(""),
+  dosage: text("dosage").notNull().default(""),
+  dosageForm: text("dosage_form").notNull().default(""),
+  form: text("form").notNull().default(""),
+  category: text("category").notNull().default(""),
+  price: numeric("price", { precision: 10, scale: 2 }).notNull(),
+  stock: integer("stock").notNull().default(0),
+  enabled: text("enabled").notNull().default("true"),
+  partnerLocations: jsonb("partner_locations").$type<string[]>().notNull().default([]),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const pharmacyOrdersTable = pgTable("sugbodoc_pharmacy_orders", {
+  reference: text("reference").primaryKey(),
+  patientId: text("patient_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  encounterId: text("encounter_id").references(() => encountersTable.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("Pending"),
+  paymentStatus: text("payment_status").notNull().default("pending"),
+  data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   createdAt: true,
   updatedAt: true,
@@ -83,6 +110,8 @@ export type Session = typeof sessionsTable.$inferSelect;
 export type Appointment = typeof appointmentsTable.$inferSelect;
 export type Encounter = typeof encountersTable.$inferSelect;
 export type ClinicalRecord = typeof clinicalRecordsTable.$inferSelect;
+export type PharmacyMedication = typeof pharmacyMedicationsTable.$inferSelect;
+export type PharmacyOrder = typeof pharmacyOrdersTable.$inferSelect;
 export type PublicUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertSession = z.infer<typeof insertSessionSchema>;

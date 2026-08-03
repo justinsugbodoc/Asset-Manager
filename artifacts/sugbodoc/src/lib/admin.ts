@@ -81,6 +81,8 @@ export type AdminMedication = {
 export type AdminOrder = {
   reference: string;
   patientId: string;
+  encounterId?: string;
+  encounterReference?: string;
   patientName: string;
   items: any[];
   fulfillmentDetails: any;

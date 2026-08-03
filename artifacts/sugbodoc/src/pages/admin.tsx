@@ -17,7 +17,19 @@ import {
 import { downloadImagingReport, type ImagingRecord, type SoapNote } from '@/lib/clinical';
 import { completeAppointment, isClinicalUser, syncAppointmentStatus, type Encounter } from '@/lib/encounters';
 import { createLegacyEncountersForPatient } from '@/lib/encounters';
-import { serverCreateEncounter, serverMigrateRecords, serverPatients, serverUpdateAppointmentStatus, serverUpdateEncounter, serverUpdatePatient, type ServerPatient } from '@/lib/server';
+import {
+  serverCreateEncounter,
+  serverMigrateRecords,
+  serverPatients,
+  serverPharmacyCatalog,
+  serverPharmacyOrders,
+  serverUpdateAppointmentStatus,
+  serverUpdateEncounter,
+  serverUpdatePatient,
+  serverUpdatePharmacyMedication,
+  serverUpdatePharmacyOrderStatus,
+  type ServerPatient,
+} from '@/lib/server';
 
 type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
 type PatientTab = 'overview' | 'appointments' | 'clinical' | 'prescriptions' | 'labs' | 'billing' | 'pharmacy' | 'insurance';
@@ -111,7 +123,7 @@ function Overview({ patients, appointments, payments, medications, orders }: { p
   </div>;
 }
 
-function PatientProfile({ patient, payments, onBack, onUpdate }: { patient: AdminPatient; payments: AdminPayment[]; onBack: () => void; onUpdate: (patient: AdminPatient) => void }) {
+function PatientProfile({ patient, payments, orders, onBack, onUpdate }: { patient: AdminPatient; payments: AdminPayment[]; orders: AdminOrder[]; onBack: () => void; onUpdate: (patient: AdminPatient) => void }) {
   const [tab, setTab] = useState<PatientTab>('overview');
   const sessionUser = getCurrentSessionUser();
   const canEditClinical = isClinicalUser(sessionUser);
@@ -178,7 +190,7 @@ function PatientProfile({ patient, payments, onBack, onUpdate }: { patient: Admi
     {tab === 'prescriptions' && <SimpleTable columns={['Medicine', 'Dosage', 'Instructions', 'Status', 'Encounter']} rows={(selectedEncounter?.prescriptions ?? []).map((rx: any) => [rx.name, rx.dosage, rx.instructions, rx.status, selectedEncounter.encounterReference])} />}
     {tab === 'labs' && <div className="space-y-5"><div><h2 className="mb-3 text-lg font-bold">Lab results</h2><SimpleTable columns={['Test', 'Result', 'Range', 'Date', 'Status']} rows={(selectedEncounter?.laboratoryResults ?? []).map((lab: any) => [lab.test, lab.result, lab.range, lab.date, lab.status])} /></div><AdminImagingList records={selectedEncounter?.imaging ?? []} /></div>}
     {tab === 'billing' && <div className="space-y-5"><div><h2 className="mb-3 text-lg font-bold">Bills · {selectedEncounter?.encounterReference ?? 'All encounters'}</h2><SimpleTable columns={['Description', 'Date', 'Amount', 'Status', 'Encounter']} rows={encounterBills.map((bill: any) => [bill.description, bill.date, money(bill.amount), bill.status, bill.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} /></div><div><h2 className="mb-3 text-lg font-bold">Payments</h2><SimpleTable columns={['Description', 'Date', 'Amount', 'Reference', 'Status', 'Encounter']} rows={encounterPayments.map((payment: any) => [payment.description, payment.date, money(payment.amount), payment.reference, payment.status, payment.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} /></div></div>}
-    {tab === 'pharmacy' && <SimpleTable columns={['Order', 'Created', 'Fulfillment', 'Payment', 'Received', 'Encounter']} rows={(selectedEncounter?.pharmacyOrders ?? []).map((order: any) => [order.reference, new Date(order.createdAt).toLocaleDateString(), order.fulfillmentDetails?.mode ?? '—', order.paymentStatus ?? '—', order.status === 'Received' ? 'Yes' : 'No', order.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} />}
+    {tab === 'pharmacy' && <SimpleTable columns={['Order', 'Created', 'Fulfillment', 'Payment', 'Received', 'Encounter']} rows={orders.filter(order => order.patientId === patient.id && (!selectedEncounter || !order.encounterId || order.encounterId === selectedEncounter.id)).map((order: any) => [order.reference, new Date(order.createdAt).toLocaleDateString(), order.fulfillmentDetails?.mode ?? '—', order.paymentStatus ?? '—', order.status === 'Received' ? 'Yes' : 'No', order.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} />}
     {tab === 'insurance' && <div className="grid gap-5 lg:grid-cols-2"><div className={`${cardClass} p-5`}><h2 className="font-bold">Insurance details</h2>{patient.clinical.insurance ? <div className="mt-4 grid gap-4 sm:grid-cols-2"><Info label="Provider" value={patient.clinical.insurance.provider} /><Info label="Member number" value={patient.clinical.insurance.memberNumber} /><Info label="Plan" value={patient.clinical.insurance.plan} /><Info label="Expiration" value={patient.clinical.insurance.expirationDate} /></div> : <EmptyState text="No insurance record saved." />}</div><div className={`${cardClass} p-5`}><h2 className="font-bold">Claims</h2>{patient.clinical.claims.length ? <div className="mt-4 space-y-3">{patient.clinical.claims.map(claim => <div key={claim.id} className="flex items-center justify-between rounded-xl bg-muted/40 p-3 text-sm"><div><p className="font-semibold">{claim.reference}</p><p className="text-xs text-muted-foreground">{claim.relatedLabel}</p></div><StatusBadge value={claim.status} /></div>)}</div> : <EmptyState text="No claims submitted." />}</div></div>}
     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><strong>Clinical record protection:</strong> SOAP notes, diagnoses, prescriptions, laboratory results, and other clinical records are read-only in the admin portal. Editing requires explicit clinical authorization.</div>
   </div>;
@@ -253,12 +265,50 @@ function Payments({ payments, onPayments }: { payments: AdminPayment[]; onPaymen
 function Medications({ medications, onMedications }: { medications: AdminMedication[]; onMedications: (value: AdminMedication[]) => void }) {
   const [query, setQuery] = useState(''); const [showForm, setShowForm] = useState(false); const [editing, setEditing] = useState<AdminMedication | null>(null);
   const filtered = medications.filter(m => `${m.name} ${m.genericName} ${m.category}`.toLowerCase().includes(query.toLowerCase()));
-  const save = (event: React.FormEvent<HTMLFormElement>) => { event.preventDefault(); const data = new FormData(event.currentTarget); const next: AdminMedication = { id: editing?.id ?? `med_${Date.now()}`, name: String(data.get('name')), description: String(data.get('description')), genericName: String(data.get('genericName')), dosage: String(data.get('dosage')), dosageForm: String(data.get('dosageForm')), form: String(data.get('dosageForm')), category: String(data.get('category')), price: Number(data.get('price')), stock: Number(data.get('stock')), enabled: Number(data.get('stock')) > 0, availability: Number(data.get('stock')) > 50 ? 'Available' : Number(data.get('stock')) > 0 ? 'Low Stock' : 'Out of Stock', partnerLocations: editing?.partnerLocations ?? ['Sugbo Pharmacy Escario'], updatedAt: new Date().toISOString() }; onMedications(editing ? medications.map(m => m.id === editing.id ? next : m) : [next, ...medications]); addAuditEvent(editing ? 'Updated medication inventory' : 'Added medication', next.name); setEditing(null); setShowForm(false); };
+  const save = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const stock = Number(data.get('stock'));
+    const next: AdminMedication = {
+      id: editing?.id ?? `med_${Date.now()}`,
+      name: String(data.get('name')),
+      description: String(data.get('description')),
+      genericName: String(data.get('genericName')),
+      dosage: String(data.get('dosage')),
+      dosageForm: String(data.get('dosageForm')),
+      form: String(data.get('dosageForm')),
+      category: String(data.get('category')),
+      price: Number(data.get('price')),
+      stock,
+      enabled: stock > 0,
+      availability: stock > 50 ? 'Available' : stock > 0 ? 'Low Stock' : 'Out of Stock',
+      partnerLocations: editing?.partnerLocations ?? ['Sugbo Pharmacy Escario'],
+      updatedAt: new Date().toISOString(),
+    };
+    void serverUpdatePharmacyMedication(next)
+      .then(({ medication }) => {
+        onMedications(editing ? medications.map(m => m.id === editing.id ? medication as AdminMedication : m) : [medication as AdminMedication, ...medications]);
+        addAuditEvent(editing ? 'Updated medication inventory' : 'Added medication', next.name);
+        setEditing(null);
+        setShowForm(false);
+      })
+      .catch(error => {
+        addAuditEvent('Pharmacy inventory update failed', next.name);
+        window.alert(error instanceof Error ? error.message : 'Unable to save medication inventory.');
+      });
+  };
   return <div className="space-y-5"><PageHeading eyebrow="Pharmacy operations" title="Medication inventory" description="Add, edit, restock, disable, or remove medicines shown in the patient Medication page." action={<button onClick={() => { setEditing(null); setShowForm(true); }} className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Plus className="mr-1 inline h-4 w-4" /> Add medication</button>} />{showForm && <form onSubmit={save} className={`${cardClass} grid gap-4 p-5 md:grid-cols-2`}><h2 className="md:col-span-2 font-bold">{editing ? 'Edit medication' : 'Add new medication'}</h2><Field name="name" label="Medication name" defaultValue={editing?.name} required /><Field name="genericName" label="Generic name" defaultValue={editing?.genericName} required /><Field name="description" label="Description" defaultValue={editing?.description} required /><Field name="dosage" label="Dosage" defaultValue={editing?.dosage} required /><Field name="dosageForm" label="Dosage form" defaultValue={editing?.dosageForm} required /><Field name="category" label="Category" defaultValue={editing?.category} required /><Field name="price" label="Price (PHP)" type="number" step="0.01" defaultValue={editing?.price} required /><Field name="stock" label="Stock quantity" type="number" defaultValue={editing?.stock} required /><div className="flex gap-2 md:col-span-2"><button className="rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground"><Check className="mr-1 inline h-4 w-4" /> Save</button><button type="button" onClick={() => setShowForm(false)} className="rounded-xl border border-border px-4 py-2.5 text-sm font-bold">Cancel</button></div></form>}<div className={`${cardClass} overflow-hidden`}><div className="border-b border-border p-4"><div className="relative max-w-md"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search inventory" className={`${inputClass} pl-9`} /></div></div><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Medication</th><th className="px-5 py-4">Category / form</th><th className="px-5 py-4">Price</th><th className="px-5 py-4">Stock</th><th className="px-5 py-4">Availability</th><th className="px-5 py-4">Actions</th></tr></thead><tbody className="divide-y divide-border">{filtered.map(med => <tr key={med.id}><td className="px-5 py-4"><p className="font-bold">{med.name}</p><p className="text-xs text-muted-foreground">{med.genericName}</p></td><td className="px-5 py-4 text-muted-foreground">{med.category}<br />{med.dosage} · {med.form}</td><td className="px-5 py-4 font-bold">{money(med.price)}</td><td className="px-5 py-4"><input type="number" min="0" value={med.stock} onChange={e => { const stock = Number(e.target.value); onMedications(medications.map(m => m.id === med.id ? { ...m, stock, enabled: stock > 0 && m.enabled, availability: !m.enabled ? 'Disabled' : stock > 50 ? 'Available' : stock > 0 ? 'Low Stock' : 'Out of Stock' } : m)); }} className="h-8 w-20 rounded-lg border border-border bg-background px-2 text-xs" /></td><td className="px-5 py-4"><StatusBadge value={med.enabled ? med.availability : 'Disabled'} /></td><td className="px-5 py-4"><div className="flex flex-wrap gap-1.5"><button onClick={() => { setEditing(med); setShowForm(true); }} className="rounded-lg border border-border p-2 hover:bg-muted" title="Edit"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => onMedications(medications.map(m => m.id === med.id ? { ...m, enabled: !m.enabled, availability: !m.enabled ? (m.stock > 50 ? 'Available' : m.stock > 0 ? 'Low Stock' : 'Out of Stock') : 'Disabled' } : m))} className="rounded-lg border border-border px-2 py-1.5 text-[10px] font-bold">{med.enabled ? 'Disable' : 'Enable'}</button><button onClick={() => { if (window.confirm(`Remove ${med.name}?`)) { onMedications(medications.filter(m => m.id !== med.id)); addAuditEvent('Removed medication', med.name); } }} className="rounded-lg border border-rose-200 p-2 text-rose-600 hover:bg-rose-50" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button></div></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No medications match your search." />}</div></div></div>;
 }
 
 function Orders({ orders, patients, onOrders }: { orders: AdminOrder[]; patients: AdminPatient[]; onOrders: (value: AdminOrder[]) => void }) {
-  const update = (order: AdminOrder, status: AdminOrder['status']) => { onOrders(orders.map(item => item.reference === order.reference ? { ...item, status } : item)); addAuditEvent('Updated pharmacy order status', order.reference); };
+  const update = (order: AdminOrder, status: AdminOrder['status']) => {
+    void serverUpdatePharmacyOrderStatus(order.reference, status)
+      .then(({ order: updated }) => {
+        onOrders(orders.map(item => item.reference === order.reference ? { ...item, ...updated } : item));
+        addAuditEvent('Updated pharmacy order status', order.reference);
+      })
+      .catch(error => window.alert(error instanceof Error ? error.message : 'Unable to update pharmacy order.'));
+  };
   return <div className="space-y-5"><PageHeading eyebrow="Pharmacy fulfillment" title="Pharmacy Orders" description="Update delivery or pickup progress and see whether patients confirmed receipt." /><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Order</th><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Fulfillment</th><th className="px-5 py-4">Amount</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Patient received?</th></tr></thead><tbody className="divide-y divide-border">{orders.map(order => <tr key={order.reference}><td className="px-5 py-4 font-mono text-xs font-bold">{order.reference}</td><td className="px-5 py-4 font-semibold">{order.patientName || patients.find(p => p.id === order.patientId)?.name || '—'}</td><td className="px-5 py-4 text-muted-foreground">{order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup'}<br /><span className="text-xs">{order.fulfillmentDetails?.location || order.fulfillmentDetails?.address || '—'}</span></td><td className="px-5 py-4 font-bold">{money(order.totals?.total ?? 0)}</td><td className="px-5 py-4"><select value={order.status} onChange={e => update(order, e.target.value as AdminOrder['status'])} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>Pending</option><option>Processing</option><option>Ready for Pickup</option><option>Out for Delivery</option><option>Delivered</option><option>Received</option><option>Cancelled</option></select></td><td className="px-5 py-4">{order.status === 'Received' ? <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Check className="h-4 w-4" /> Yes</span> : <span className="text-xs text-muted-foreground">No</span>}</td></tr>)}</tbody></table>{!orders.length && <EmptyState text="No pharmacy orders yet." />}</div></div></div>;
 }
 
@@ -389,6 +439,15 @@ export default function Admin() {
   const [selectedPatient, setSelectedPatient] = useState<AdminPatient | null>(null);
   useEffect(() => {
     let active = true;
+    Promise.all([serverPharmacyCatalog(), serverPharmacyOrders()])
+      .then(([catalogResponse, ordersResponse]) => {
+        if (!active) return;
+        setMedications(catalogResponse.medications as AdminMedication[]);
+        setOrders(ordersResponse.orders as AdminOrder[]);
+      })
+      .catch(() => {
+        // LocalStorage remains the compatibility fallback when the API is unavailable.
+      });
     serverPatients()
       .then(async ({ patients: remotePatients }) => {
         if (!active) return;
@@ -428,7 +487,7 @@ export default function Admin() {
   const updatePayments = (value: AdminPayment[]) => { setPayments(value); saveAdminPayments(value); setEvents(loadAuditEvents()); };
   const updateSchedules = (value: AdminSchedule[]) => { setSchedules(value); saveAdminSchedules(value); setEvents(loadAuditEvents()); };
   const handleLogout = () => { logout(); setLocation('/login'); };
-  const content = selectedPatient ? <PatientProfile patient={selectedPatient} payments={payments} onBack={() => setSelectedPatient(null)} onUpdate={patient => { updatePatients(patients.map(p => p.id === patient.id ? patient : p)); setSelectedPatient(patient); }} /> :
+  const content = selectedPatient ? <PatientProfile patient={selectedPatient} payments={payments} orders={orders} onBack={() => setSelectedPatient(null)} onUpdate={patient => { updatePatients(patients.map(p => p.id === patient.id ? patient : p)); setSelectedPatient(patient); }} /> :
     section === 'overview' ? <Overview patients={patients} appointments={appointments} payments={payments} medications={medications} orders={orders} /> :
     section === 'patients' ? <Patients patients={patients} onSelect={setSelectedPatient} onUpdate={patient => updatePatients(patients.map(p => p.id === patient.id ? patient : p))} /> :
     section === 'appointments' ? <Appointments patients={patients} schedules={schedules} onSchedules={updateSchedules} onPatients={updatePatients} /> :

@@ -17,8 +17,15 @@ import {
   loadAdminMedications,
   type AdminMedication,
 } from '@/lib/admin';
-import { attachPharmacyOrderToEncounter, getLatestPatientEncounter } from '@/lib/encounters';
-import { serverUpdateMe, serverUpdatePatientEncounterData } from '@/lib/server';
+import { getLatestPatientEncounter } from '@/lib/encounters';
+import {
+  serverConfirmPharmacyPayment,
+  serverCreatePharmacyCheckout,
+  serverMarkPharmacyOrderReceived,
+  serverPharmacyCatalog,
+  serverPharmacyOrders,
+  serverUpdateMe,
+} from '@/lib/server';
 
 // Dummy catalog data
 const LEGACY_MEDICATIONS_CATALOG = [
@@ -77,9 +84,30 @@ export default function Medications() {
   const [catalog, setCatalog] = useState<AdminMedication[]>(() => loadAdminMedications());
 
   useEffect(() => {
-    const refreshCatalog = () => setCatalog(loadAdminMedications());
+    let active = true;
+    void serverPharmacyCatalog().then(({ medications }) => {
+      if (active) setCatalog(medications as AdminMedication[]);
+    }).catch(() => undefined);
+    const refreshCatalog = () => {
+      void serverPharmacyCatalog().then(({ medications }) => {
+        if (active) setCatalog(medications as AdminMedication[]);
+      }).catch(() => setCatalog(loadAdminMedications()));
+    };
     window.addEventListener('storage', refreshCatalog);
-    return () => window.removeEventListener('storage', refreshCatalog);
+    return () => {
+      active = false;
+      window.removeEventListener('storage', refreshCatalog);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void serverPharmacyOrders().then(({ orders: remoteOrders }) => {
+      if (active) setOrders(remoteOrders);
+    }).catch(() => undefined);
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Sync to localStorage
@@ -158,19 +186,15 @@ export default function Medications() {
               encounterId: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.id,
               encounterReference: getLatestPatientEncounter(currentUser?.id, currentUser?.name)?.encounterReference,
             };
-            const localEncounter = attachPharmacyOrderToEncounter(order, currentUser?.id, currentUser?.name);
-            if (localEncounter?.id) {
-              void serverUpdatePatientEncounterData(localEncounter.id, {
-                pharmacyOrders: localEncounter.pharmacyOrders ?? [],
-                billing: localEncounter.billing,
-              }).catch(() => {
-                toast({
-                  title: 'Order saved locally',
-                  description: 'The shared clinical record could not be updated yet.',
-                  variant: 'destructive',
-                });
-              });
-            }
+            void serverConfirmPharmacyPayment(result.medicationOrderId, sessionId)
+              .then(({ order: confirmedOrder }) => setOrders(currentOrders => currentOrders.map(existing =>
+                existing.reference === confirmedOrder.reference ? confirmedOrder : existing,
+              )))
+              .catch(error => toast({
+                title: 'Order confirmation failed',
+                description: error instanceof Error ? error.message : 'The payment was received, but the pharmacy order needs support review.',
+                variant: 'destructive',
+              }));
             return [order, ...current];
           });
 
@@ -292,26 +316,16 @@ export default function Medications() {
       };
       localStorage.setItem('sugbodoc_medication_checkout_draft', JSON.stringify(orderPayload));
 
-      const base = import.meta.env.BASE_URL?.replace(/\/$/, '') ?? '';
       const appBase = `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`;
       
-      const response = await fetch(`${base}/api/stripe/create-medication-checkout-session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cartItems: cartItems.map(({ id, quantity }) => ({ id, quantity })),
-          insuranceCoverageAmount: estimatedInsuranceCoverage,
-          fulfillmentDetails: orderPayload.fulfillmentDetails,
-          patientEmail: currentUser?.email,
-          successUrl: `${appBase}medications?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-          cancelUrl: `${appBase}medications?payment=cancelled`,
-          medicationOrderPayload: orderPayload
-        })
+      const result = await serverCreatePharmacyCheckout({
+        cartItems: cartItems.map(({ id, quantity }) => ({ id, quantity })),
+        encounterId: latestEncounter?.id,
+        insuranceCoverageAmount: estimatedInsuranceCoverage,
+        fulfillmentDetails: orderPayload.fulfillmentDetails,
+        successUrl: `${appBase}medications?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${appBase}medications?payment=cancelled`,
       });
-      
-      const result = await response.json();
-      if (!response.ok || !result.checkoutUrl) throw new Error(result.error || 'Failed to start checkout');
-      
       window.location.href = result.checkoutUrl;
     } catch (err) {
       toast({ title: 'Checkout Error', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
@@ -319,18 +333,21 @@ export default function Medications() {
     }
   };
 
-  const markOrderReceived = (reference: string) => {
-    setOrders(current =>
-      current.map(order =>
-        order.reference === reference
-          ? { ...order, status: 'Received', receivedAt: new Date().toISOString() }
-          : order,
-      ),
-    );
-    toast({
-      title: 'Order marked as received',
-      description: 'Thanks for confirming that your pharmacy order arrived.',
-    });
+  const markOrderReceived = async (reference: string) => {
+    try {
+      const { order } = await serverMarkPharmacyOrderReceived(reference);
+      setOrders(current => current.map(existing => existing.reference === reference ? order : existing));
+      toast({
+        title: 'Order marked as received',
+        description: 'Thanks for confirming that your pharmacy order arrived.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Could not update order',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const sortedOrders = [...orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

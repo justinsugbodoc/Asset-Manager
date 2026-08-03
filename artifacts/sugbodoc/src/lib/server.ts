@@ -156,3 +156,68 @@ export function serverUpdatePatientEncounterData(
     },
   );
 }
+
+export type ServerMedication = {
+  id: string;
+  name: string;
+  description: string;
+  genericName: string;
+  dosage: string;
+  dosageForm: string;
+  form: string;
+  category: string;
+  price: number;
+  stock: number;
+  enabled: boolean;
+  partnerLocations: string[];
+  updatedAt: string;
+};
+
+export function serverPharmacyCatalog() {
+  return request<{ medications: ServerMedication[] }>('/pharmacy/catalog');
+}
+
+export function serverUpdatePharmacyMedication(item: ServerMedication) {
+  return request<{ medication: ServerMedication }>(`/pharmacy/catalog/${encodeURIComponent(item.id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(item),
+  });
+}
+
+export function serverPharmacyOrders() {
+  return request<{ orders: any[] }>('/pharmacy/orders');
+}
+
+export function serverCreatePharmacyCheckout(input: {
+  cartItems: Array<{ id: string; quantity: number }>;
+  encounterId?: string;
+  insuranceCoverageAmount: number;
+  fulfillmentDetails: Record<string, unknown>;
+  successUrl: string;
+  cancelUrl: string;
+}) {
+  return request<{ checkoutUrl: string; sessionId: string; orderId: string; total: number }>('/pharmacy/create-checkout-session', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function serverConfirmPharmacyPayment(reference: string, sessionId: string) {
+  return request<{ order: any }>(`/pharmacy/orders/${encodeURIComponent(reference)}/confirm-payment`, {
+    method: 'POST',
+    body: JSON.stringify({ sessionId }),
+  });
+}
+
+export function serverUpdatePharmacyOrderStatus(reference: string, status: string) {
+  return request<{ order: any }>(`/pharmacy/orders/${encodeURIComponent(reference)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function serverMarkPharmacyOrderReceived(reference: string) {
+  return request<{ order: any }>(`/pharmacy/orders/${encodeURIComponent(reference)}/received`, {
+    method: 'PATCH',
+  });
+}

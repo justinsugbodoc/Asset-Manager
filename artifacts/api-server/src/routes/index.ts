@@ -5,6 +5,7 @@ import stripeRouter from "./stripe";
 import accountsRouter from "./accounts";
 import appointmentsRouter from "./appointments";
 import clinicalRecordsRouter from "./clinical-records";
+import pharmacyRouter from "./pharmacy";
 
 const router: IRouter = Router();
 
@@ -14,5 +15,6 @@ router.use(stripeRouter);
 router.use(accountsRouter);
 router.use(appointmentsRouter);
 router.use(clinicalRecordsRouter);
+router.use(pharmacyRouter);
 
 export default router;
