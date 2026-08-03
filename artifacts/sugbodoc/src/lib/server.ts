@@ -10,7 +10,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${base()}/api${path}`, { ...init, headers });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(typeof body?.error === 'string' ? body.error : `Request failed (${response.status})`);
+  if (!response.ok) {
+    const detailMessages = Object.entries(body?.details?.fieldErrors ?? {})
+      .flatMap(([field, messages]) => (Array.isArray(messages) ? messages.map(message => `${field}: ${message}`) : []));
+    const message = typeof body?.error === 'string' ? body.error : `Request failed (${response.status})`;
+    throw new Error(detailMessages.length ? `${message} ${detailMessages.join(' ')}` : message);
+  }
   return body as T;
 }
 

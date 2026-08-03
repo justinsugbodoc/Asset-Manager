@@ -251,9 +251,9 @@ export default function Medications() {
 
   const isFulfillmentValid = useMemo(() => {
     if (fulfillmentMode === 'delivery') {
-      return deliveryForm.recipientName.trim() !== '' && 
-             deliveryForm.phone.trim() !== '' && 
-             deliveryForm.address.trim() !== '';
+      return deliveryForm.recipientName.trim().length >= 1 &&
+             deliveryForm.phone.trim().length >= 5 &&
+             deliveryForm.address.trim().length >= 10;
     }
     return !!pickupLocation;
   }, [fulfillmentMode, deliveryForm, pickupLocation]);
