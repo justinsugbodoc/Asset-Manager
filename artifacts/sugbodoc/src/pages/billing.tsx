@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import AppShell from '@/components/layout/app-shell';
-import { bills as mockBills, pastBills } from '@/data/mock';
 import { CreditCard, FileText, CheckCircle2, ChevronRight, ShieldCheck, ExternalLink } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { calculateInsuranceEstimate, createOrUpdateClaim, loadInsurance } from '@/lib/insurance';
@@ -12,7 +11,9 @@ export default function Billing() {
   const currentUser = getCurrentSessionUser();
   const activeEncounter = getLatestPatientEncounter(currentUser?.id, currentUser?.name);
   const [bills, setBills] = useState<any[]>([]);
-  const [history, setHistory] = useState(() => pastBills.map(bill => ({ ...bill, encounterId: activeEncounter?.id, encounterReference: activeEncounter?.encounterReference })));
+  const [history, setHistory] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [billingError, setBillingError] = useState<string | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -35,16 +36,19 @@ export default function Billing() {
           setBills(sharedBills.filter((bill: any) => bill.status !== 'Paid'));
           setHistory(sharedBills.filter((bill: any) => bill.status === 'Paid'));
         } else {
-          setBills(mockBills);
-          setHistory(pastBills.map(bill => ({
-            ...bill,
-            encounterId: activeEncounter?.id,
-            encounterReference: activeEncounter?.encounterReference,
-          })));
+          setBills([]);
+          setHistory([]);
         }
+        setBillingError(null);
+        setIsLoading(false);
       }
-    }).catch(() => {
-      if (active) setBills(mockBills);
+    }).catch((error) => {
+      if (active) {
+        setBills([]);
+        setHistory([]);
+        setBillingError(error instanceof Error ? error.message : 'Unable to load billing records.');
+        setIsLoading(false);
+      }
     });
     return () => {
       active = false;
@@ -172,6 +176,37 @@ export default function Billing() {
       description: `Receipt ${receiptId} has been saved to your device.`,
     });
   };
+
+  if (isLoading) {
+    return (
+      <AppShell title="Billing & Payments">
+        <div className="rounded-2xl border border-border bg-card p-10 text-center shadow-sm">
+          <CreditCard className="mx-auto mb-3 h-10 w-10 animate-pulse text-primary" />
+          <p className="font-semibold">Loading your billing records…</p>
+          <p className="mt-1 text-sm text-muted-foreground">Fetching the latest information from SugboDoc.</p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (billingError) {
+    return (
+      <AppShell title="Billing & Payments">
+        <div className="rounded-2xl border border-destructive/30 bg-card p-10 text-center shadow-sm">
+          <CreditCard className="mx-auto mb-3 h-10 w-10 text-destructive" />
+          <p className="font-semibold">Billing records are unavailable</p>
+          <p className="mt-1 text-sm text-muted-foreground">{billingError}</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-5 rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground"
+          >
+            Try again
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell title="Billing & Payments">
