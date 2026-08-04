@@ -33,6 +33,7 @@ export type AdminPatient = SessionUser & {
   id: string;
   status: 'Active' | 'Inactive';
   lastActive: string;
+  emergencyContact?: { name: string; number: string } | null;
   clinical: {
     appointments: any[];
     encounters: any[];

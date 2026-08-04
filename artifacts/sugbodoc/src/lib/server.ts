@@ -33,6 +33,7 @@ export type ServerAppointment = {
 
 export type ServerPatient = SessionUser & {
   lastActive: string;
+  emergencyContact?: { name: string; number: string } | null;
   appointments: ServerAppointment[];
   records: Encounter[];
 };

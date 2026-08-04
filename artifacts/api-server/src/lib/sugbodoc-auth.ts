@@ -23,6 +23,7 @@ function toPublicUser(user: User): AuthUser {
     birthday: user.birthday,
     gender: user.gender,
     bloodType: user.bloodType,
+    emergencyContact: user.emergencyContact,
     role: user.role as AuthUser["role"],
     status: user.status as AuthUser["status"],
     clinicalEditingPermission: user.clinicalEditingPermission === "true",

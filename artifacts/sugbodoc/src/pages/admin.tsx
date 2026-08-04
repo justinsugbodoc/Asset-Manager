@@ -3,17 +3,17 @@ import {
   Activity, AlertCircle, ArrowLeft, CalendarDays, Check, ChevronRight, ClipboardList,
   CreditCard, FileCheck2, FileText, Filter, LayoutDashboard, LogOut, Menu, Package,
   Pencil, Plus, Search, Settings2, ShieldCheck, Stethoscope, Trash2, Truck, Users, X,
-  Download, Image as ImageIcon, Maximize2,
+  Download, Image as ImageIcon, Maximize2, FlaskConical, HeartPulse, UserRound,
 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
-import { getCurrentSessionUser, useAuth } from '@/hooks/use-auth';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import {
   loadAdminMedications, loadAdminOrders, loadAdminPatients, loadAdminPayments,
   type AdminMedication, type AdminOrder, type AdminPatient, type AdminPayment, type AdminSchedule,
 } from '@/lib/admin';
-import { downloadImagingReport, type ImagingRecord, type SoapNote } from '@/lib/clinical';
-import { completeAppointment, isClinicalUser, syncAppointmentStatus, type Encounter } from '@/lib/encounters';
+import { downloadImagingReport, type ImagingRecord } from '@/lib/clinical';
+import { completeAppointment, syncAppointmentStatus, type Encounter } from '@/lib/encounters';
 import { createLegacyEncountersForPatient } from '@/lib/encounters';
 import {
   serverCreateEncounter,
@@ -26,8 +26,8 @@ import {
   serverPharmacyCatalog,
   serverPharmacyOrders,
   serverSaveAdminSchedules,
+  serverRecords,
   serverUpdateAppointmentStatus,
-  serverUpdateEncounter,
   serverUpdatePatient,
   serverUpdatePharmacyMedication,
   serverUpdatePharmacyOrderStatus,
@@ -35,7 +35,7 @@ import {
 } from '@/lib/server';
 
 type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
-type PatientTab = 'overview' | 'appointments' | 'clinical' | 'prescriptions' | 'labs' | 'billing' | 'pharmacy' | 'insurance';
+type AdminRecordsTab = 'encounters' | 'vitals' | 'soap' | 'diagnoses' | 'prescriptions' | 'labs' | 'imaging' | 'billing' | 'payments' | 'pharmacy';
 
 const sectionItems: Array<{ id: Section; label: string; icon: any }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -57,6 +57,9 @@ const orderDateTime = (value: string | undefined) => value
       dateStyle: 'medium',
       timeStyle: 'short',
     })
+  : '—';
+const displayDate = (value: string | undefined) => value
+  ? new Date(value).toLocaleDateString('en-PH', { dateStyle: 'medium' })
   : '—';
 const badge = (status: string) => {
   if (['Active', 'Paid', 'Approved', 'Received', 'Available', 'Delivered'].includes(status)) return 'bg-emerald-100 text-emerald-800';
@@ -136,85 +139,149 @@ function Overview({ patients, appointments, payments, medications, orders }: { p
   </div>;
 }
 
-function PatientProfile({ patient, payments, orders, onBack, onUpdate }: { patient: AdminPatient; payments: AdminPayment[]; orders: AdminOrder[]; onBack: () => void; onUpdate: (patient: AdminPatient) => void }) {
-  const [tab, setTab] = useState<PatientTab>('overview');
-  const sessionUser = getCurrentSessionUser();
-  const canEditClinical = isClinicalUser(sessionUser);
-  const [patientEncounters, setPatientEncounters] = useState<Encounter[]>(() => patient.clinical.encounters as Encounter[]);
-  const [selectedEncounterId, setSelectedEncounterId] = useState(patientEncounters[0]?.id ?? '');
-  const selectedEncounter = patientEncounters.find(item => item.id === selectedEncounterId) ?? patientEncounters[0];
-  const encounterBills = selectedEncounter
-    ? patient.clinical.bills.filter((bill: any) => (selectedEncounter.billing?.relatedBillIds ?? []).includes(bill.id))
-    : patient.clinical.bills;
-  const encounterPayments = selectedEncounter
-    ? selectedEncounter.billing?.payments ?? []
-    : payments.filter(payment => payment.patientId === patient.id);
-  const tabs: Array<[PatientTab, string]> = [['overview', 'Overview'], ['appointments', 'Appointments'], ['clinical', 'Clinical records'], ['prescriptions', 'Prescriptions'], ['labs', 'Lab results'], ['billing', 'Bills & payments'], ['pharmacy', 'Pharmacy Orders'], ['insurance', 'Insurance & claims']];
-  const editSoapNote = async (note: any) => {
-    if (!canEditClinical) return;
-    const subjective = window.prompt('Subjective', note.subjective);
-    if (subjective === null) return;
-    const objective = window.prompt('Objective', note.objective);
-    if (objective === null) return;
-    const assessment = window.prompt('Assessment', note.assessment);
-    if (assessment === null) return;
-    const plan = window.prompt('Plan', note.plan);
-    if (plan === null) return;
-    if (!note.encounterId) return;
-    const currentEncounter = patientEncounters.find(item => item.id === note.encounterId);
-    if (!currentEncounter) return;
-    const updated = {
-      ...currentEncounter,
-      soapNotes: currentEncounter.soapNotes.map(item => item.id === note.id
-        ? { ...item, subjective, objective, assessment, plan, status: 'Amended' }
-        : item),
-    };
-    try {
-      const response = await serverUpdateEncounter(updated);
-      setPatientEncounters(current => current.map(item => item.id === response.encounter.id ? response.encounter : item));
-      onUpdate({
-        ...patient,
-        clinical: {
-          ...patient.clinical,
-          encounters: patientEncounters.map(item => item.id === response.encounter.id ? response.encounter : item),
-          soapNotes: patient.clinical.soapNotes.map((item: any) => item.id === note.id ? { ...item, subjective, objective, assessment, plan, status: 'Amended' } : item),
-        },
+function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: AdminPatient; payments: AdminPayment[]; orders: AdminOrder[]; onBack: () => void }) {
+  const [tab, setTab] = useState<AdminRecordsTab>('encounters');
+  const [encounters, setEncounters] = useState<Encounter[]>(() => patient.clinical.encounters as Encounter[]);
+  const [selectedEncounterId, setSelectedEncounterId] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
+    serverRecords(patient.id)
+      .then(response => {
+        if (!active) return;
+        setEncounters(response.encounters as Encounter[]);
+      })
+      .catch(cause => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Unable to load this patient record.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-      addAuditEvent('Amended SOAP note', note.consultationReference ?? note.id);
-    } catch {
-      addAuditEvent('Failed to amend SOAP note', note.consultationReference ?? note.id);
+    return () => { active = false; };
+  }, [patient.id]);
+
+  const completedAppointmentIds = new Set(
+    patient.clinical.appointments
+      .filter(appointment => appointment.status === 'Completed')
+      .map(appointment => appointment.id),
+  );
+  const completedEncounters = encounters.filter(encounter =>
+    (encounter.appointmentId && completedAppointmentIds.has(encounter.appointmentId))
+    || encounter.appointmentDetails?.status === 'Completed',
+  );
+  const selectedEncounter = completedEncounters.find(item => item.id === selectedEncounterId) ?? completedEncounters[0];
+  const selectedOrders = selectedEncounter
+    ? orders.filter(order => order.patientId === patient.id && order.encounterId === selectedEncounter.id)
+    : [];
+  const selectedPayments = selectedEncounter
+    ? [
+        ...(selectedEncounter.billing?.payments ?? []).map(payment => ({
+          ...payment,
+          patientId: patient.id,
+          patientName: patient.name,
+          encounterId: selectedEncounter.id,
+          encounterReference: selectedEncounter.encounterReference,
+        })),
+        ...payments.filter(payment => payment.patientId === patient.id && (payment as any).encounterId === selectedEncounter.id),
+      ].filter((payment, index, all) => all.findIndex(item => (item.id && item.id === payment.id) || (item.reference && item.reference === payment.reference)) === index)
+    : [];
+  const selectedBills = selectedEncounter?.bills ?? [];
+  const tabs: Array<[AdminRecordsTab, string]> = [
+    ['encounters', 'Encounters'],
+    ['vitals', 'Vitals'],
+    ['soap', 'SOAP Notes'],
+    ['diagnoses', 'Diagnoses'],
+    ['prescriptions', 'Prescriptions'],
+    ['labs', 'Lab Results'],
+    ['imaging', 'Imaging'],
+    ['billing', 'Billing'],
+    ['payments', 'Payments'],
+    ['pharmacy', 'Pharmacy Orders'],
+  ];
+
+  useEffect(() => {
+    if (selectedEncounter && selectedEncounter.id !== selectedEncounterId) {
+      setSelectedEncounterId(selectedEncounter.id);
     }
-  };
-  const updateAccount = async (status: 'Active' | 'Inactive') => {
-    try {
-      const response = await serverUpdatePatient(patient.id, { status });
-      onUpdate({ ...patient, ...response.patient, status });
-      addAuditEvent(`${status === 'Active' ? 'Activated' : 'Deactivated'} patient account`, patient.name);
-    } catch {
-      addAuditEvent(`Failed to update patient account`, patient.name);
+  }, [selectedEncounter, selectedEncounterId]);
+
+  const summary = (value: unknown) => typeof value === 'string' && value.trim() ? value : '—';
+  const insurance = patient.insurance as Record<string, unknown> | null | undefined;
+  const emergencyContact = patient.emergencyContact;
+  const recordScope = <span className="ml-auto rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">Encounter-scoped</span>;
+  const empty = (text: string) => <EmptyState text={text} />;
+  const table = (columns: string[], rows: any[][], text: string) => rows.length ? <SimpleTable columns={columns} rows={rows} /> : empty(text);
+
+  const renderTab = () => {
+    if (loading) {
+      return <div className="space-y-4">{Array.from({ length: 3 }, (_, index) => <div key={`record-skeleton-${index}`} className={`${cardClass} h-36 animate-pulse bg-muted/40`} />)}</div>;
     }
+    if (error) return <div className={`${cardClass} p-6`}>{empty(error)}</div>;
+    if (!selectedEncounter) return <div className={`${cardClass} p-6`}>{empty('No completed appointment has a clinical encounter yet.')}</div>;
+
+    if (tab === 'encounters') {
+      return <div className="space-y-4">{completedEncounters.map(encounter => <button key={encounter.id} type="button" onClick={() => { setSelectedEncounterId(encounter.id); setTab('soap'); }} className={`${cardClass} w-full p-5 text-left transition hover:border-primary/50 ${encounter.id === selectedEncounter.id ? 'border-primary ring-2 ring-primary/10' : ''}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-primary">{encounter.encounterReference}</p><h2 className="mt-1 text-lg font-bold">{encounter.chiefComplaint || 'Completed consultation'}</h2><p className="mt-1 text-sm text-muted-foreground">{encounter.date} · {encounter.doctor} · {encounter.specialty}</p></div><StatusBadge value="Completed" /></div><div className="mt-4 grid gap-3 rounded-xl bg-muted/40 p-4 text-sm sm:grid-cols-3"><Info label="Clinic" value={summary(encounter.clinic)} /><Info label="Appointment" value={`${summary(encounter.appointmentDetails?.date)} · ${summary(encounter.appointmentDetails?.time)}`} /><Info label="Summary" value={summary(encounter.clinicalSummary)} /></div></button>)}</div>;
+    }
+    if (tab === 'vitals') {
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><HeartPulse className="h-5 w-5 text-primary" /><h2 className="font-bold">Vitals</h2>{recordScope}</div>{table(['Date', 'Blood pressure', 'Heart rate', 'Temperature', 'Weight'], selectedEncounter.vitals.map((vital: any) => [vital.date, vital.systolic != null ? `${vital.systolic}/${vital.diastolic} mmHg` : '—', vital.heartRate ? `${vital.heartRate} bpm` : '—', vital.temp ? `${vital.temp} °C` : '—', vital.weight ? `${vital.weight} kg` : '—']), 'No vitals are recorded for this encounter.')}</section>;
+    }
+    if (tab === 'soap') {
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-primary" /><h2 className="font-bold">SOAP Notes</h2>{recordScope}<span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">Read-only</span></div>{selectedEncounter.soapNotes.length ? <div className="mt-4 space-y-4">{selectedEncounter.soapNotes.map((note: any) => <div key={note.id} className="rounded-xl border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3"><div><p className="font-bold">{note.doctor}</p><p className="text-xs text-muted-foreground">{note.date} · {note.consultationReference}</p></div><StatusBadge value={note.status ?? 'Signed'} /></div><div className="mt-4 grid gap-3 md:grid-cols-2"><SoapSection title="Subjective" text={note.subjective} /><SoapSection title="Objective" text={note.objective} /><SoapSection title="Assessment" text={note.assessment} /><SoapSection title="Plan" text={note.plan} /></div></div>)}</div> : <div className="mt-4">{empty('No SOAP notes are recorded for this encounter.')}</div>}</section>;
+    }
+    if (tab === 'diagnoses') {
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Activity className="h-5 w-5 text-primary" /><h2 className="font-bold">Diagnoses</h2>{recordScope}</div>{table(['Code', 'Description', 'Status', 'Date'], selectedEncounter.diagnoses.map((diagnosis: any) => [diagnosis.code ?? '—', diagnosis.description ?? '—', diagnosis.status ?? '—', diagnosis.date ?? '—']), 'No diagnoses are recorded for this encounter.')}</section>;
+    }
+    if (tab === 'prescriptions') {
+      const prescriptions = [...selectedEncounter.prescriptions, ...selectedEncounter.medications];
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><PillIcon className="h-5 w-5 text-primary" /><h2 className="font-bold">Prescriptions</h2>{recordScope}</div>{table(['Medication', 'Dosage', 'Instructions', 'Status'], prescriptions.map((prescription: any) => [prescription.name ?? '—', prescription.dosage ?? '—', prescription.instructions ?? '—', prescription.status ?? '—']), 'No prescriptions are recorded for this encounter.')}</section>;
+    }
+    if (tab === 'labs') {
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FlaskConical className="h-5 w-5 text-primary" /><h2 className="font-bold">Laboratory Results</h2>{recordScope}</div>{table(['Test', 'Result', 'Reference range', 'Date', 'Status'], selectedEncounter.laboratoryResults.map((lab: any) => [lab.test ?? '—', lab.result ?? '—', lab.range ?? '—', lab.date ?? '—', lab.status ?? '—']), 'No laboratory results are recorded for this encounter.')}</section>;
+    }
+    if (tab === 'imaging') {
+      return <AdminImagingList records={(selectedEncounter.imaging ?? []) as ImagingRecord[]} />;
+    }
+    if (tab === 'billing') {
+      const billing = selectedEncounter.billing ?? {} as any;
+      return <div className="space-y-5"><section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /><h2 className="font-bold">Encounter billing</h2>{recordScope}</div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[['Consultation fee', billing.consultationFee], ['Laboratory charges', billing.laboratoryCharges], ['Imaging charges', billing.imagingCharges], ['Pharmacy charges', billing.pharmacyCharges], ['Insurance coverage', billing.insuranceCoverage], ['Payments', selectedPayments.reduce((sum, payment: any) => sum + Number(payment.amount ?? 0), 0)]].map(([label, amount]) => <div key={String(label)} className="rounded-xl bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-bold">{money(Number(amount ?? 0))}</p></div>)}</div></section>{table(['Description', 'Date', 'Amount', 'Status', 'Bill reference'], selectedBills.map((bill: any) => [bill.description ?? '—', bill.date ?? '—', money(Number(bill.amount ?? 0)), bill.status ?? '—', bill.id ?? '—']), 'No bills are linked to this encounter.')}</div>;
+    }
+    if (tab === 'payments') {
+      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><CreditCard className="h-5 w-5 text-primary" /><h2 className="font-bold">Payments</h2>{recordScope}</div>{table(['Description', 'Payment date', 'Amount', 'Reference', 'Status'], selectedPayments.map((payment: any) => [payment.description ?? '—', payment.date ?? '—', money(Number(payment.amount ?? 0)), payment.reference ?? '—', payment.status ?? '—']), 'No payments are linked to this encounter.')}</section>;
+    }
+    return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Truck className="h-5 w-5 text-primary" /><h2 className="font-bold">Pharmacy Orders</h2>{recordScope}</div>{table(['Order', 'Order date', 'Fulfillment', 'Payment', 'Amount', 'Received'], selectedOrders.map(order => [order.reference, orderDateTime(order.createdAt), order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup', order.paymentStatus ?? '—', money(Number((order as any).paymentAmount ?? order.totals?.total ?? 0)), order.receivedAt ? orderDateTime(order.receivedAt) : 'Not confirmed']), 'No pharmacy orders are linked to this encounter.')}</section>;
   };
+
   return <div className="space-y-5">
-    <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"><ArrowLeft className="h-4 w-4" /> Back to patients</button>
-    <div className={`${cardClass} overflow-hidden`}><div className="bg-gradient-to-br from-primary/10 via-card to-card p-6"><div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between"><div className="flex items-center gap-4"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-xl font-bold text-primary-foreground">{patient.initials}</div><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{patient.name}</h1><StatusBadge value={patient.status} /></div><p className="mt-1 text-sm text-muted-foreground">{patient.email} · {patient.phone}</p><p className="mt-1 text-xs text-muted-foreground">Patient ID: {patient.id} · Last active {new Date(patient.lastActive).toLocaleDateString('en-PH')}</p></div></div><div className="flex gap-2"><button onClick={() => void updateAccount(patient.status === 'Active' ? 'Inactive' : 'Active')} className={`rounded-xl px-3 py-2 text-xs font-bold ${patient.status === 'Active' ? 'border border-rose-200 text-rose-700 hover:bg-rose-50' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{patient.status === 'Active' ? 'Deactivate' : 'Activate'}</button><button onClick={async () => { const name = window.prompt('Update patient display name', patient.name); if (name?.trim()) { try { const response = await serverUpdatePatient(patient.id, { name: name.trim() }); onUpdate({ ...patient, ...response.patient }); addAuditEvent('Updated patient account', patient.name); } catch { addAuditEvent('Failed to update patient account', patient.name); } } }} className="rounded-xl border border-border px-3 py-2 text-xs font-bold hover:bg-muted"><Pencil className="mr-1 inline h-3 w-3" /> Update</button></div></div></div><div className="flex gap-1 overflow-x-auto border-t border-border p-2">{tabs.map(([id, label]) => <button key={id} onClick={() => setTab(id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}</div></div>
-    {tab === 'overview' && <div className="grid gap-5 lg:grid-cols-3"><div className={`${cardClass} p-5 lg:col-span-2`}><h2 className="font-bold">Personal information</h2><div className="mt-4 grid gap-4 text-sm sm:grid-cols-2"><Info label="Email" value={patient.email} /><Info label="Phone" value={patient.phone || '—'} /><Info label="Birthday" value={patient.birthday || '—'} /><Info label="Gender" value={patient.gender || '—'} /><Info label="Blood type" value={patient.bloodType || '—'} /><Info label="Account status" value={patient.status} /></div></div><div className={`${cardClass} p-5`}><h2 className="font-bold">Patient summary</h2><div className="mt-4 space-y-3 text-sm"><SummaryLine label="Appointments" value={patient.clinical.appointments.length} /><SummaryLine label="Diagnoses" value={patient.clinical.diagnoses.length} /><SummaryLine label="Prescriptions" value={patient.clinical.prescriptions.length} /><SummaryLine label="Bills" value={patient.clinical.bills.length} /><SummaryLine label="Claims" value={patient.clinical.claims.length} /></div></div></div>}
-    {tab === 'appointments' && <SimpleTable columns={['Date', 'Doctor', 'Clinic', 'Status', 'Encounter']} rows={patient.clinical.appointments.map(a => { const encounter = patientEncounters.find(item => item.appointmentId === a.id); return [a.date, a.doctor?.name ?? a.doctor, a.doctor?.clinic ?? '—', a.status, encounter?.encounterReference ?? '—']; })} />}
-    {tab === 'clinical' && <AdminEncounterClinicalPanel encounters={patientEncounters} selectedEncounterId={selectedEncounterId} onSelect={setSelectedEncounterId} canEditClinical={canEditClinical} editSoapNote={editSoapNote} />}
-    {tab === 'prescriptions' && <SimpleTable columns={['Medicine', 'Dosage', 'Instructions', 'Status', 'Encounter']} rows={(selectedEncounter?.prescriptions ?? []).map((rx: any) => [rx.name, rx.dosage, rx.instructions, rx.status, selectedEncounter.encounterReference])} />}
-    {tab === 'labs' && <div className="space-y-5"><div><h2 className="mb-3 text-lg font-bold">Lab results</h2><SimpleTable columns={['Test', 'Result', 'Range', 'Date', 'Status']} rows={(selectedEncounter?.laboratoryResults ?? []).map((lab: any) => [lab.test, lab.result, lab.range, lab.date, lab.status])} /></div><AdminImagingList records={selectedEncounter?.imaging ?? []} /></div>}
-    {tab === 'billing' && <div className="space-y-5"><div><h2 className="mb-3 text-lg font-bold">Bills · {selectedEncounter?.encounterReference ?? 'All encounters'}</h2><SimpleTable columns={['Description', 'Date', 'Amount', 'Status', 'Encounter']} rows={encounterBills.map((bill: any) => [bill.description, bill.date, money(bill.amount), bill.status, bill.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} /></div><div><h2 className="mb-3 text-lg font-bold">Payments</h2><SimpleTable columns={['Description', 'Date', 'Amount', 'Reference', 'Status', 'Encounter']} rows={encounterPayments.map((payment: any) => [payment.description, payment.date, money(payment.amount), payment.reference, payment.status, payment.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} /></div></div>}
-    {tab === 'pharmacy' && <SimpleTable columns={['Order', 'Order date & time', 'Fulfillment', 'Payment', 'Received', 'Encounter']} rows={orders.filter(order => order.patientId === patient.id && (!selectedEncounter || !order.encounterId || order.encounterId === selectedEncounter.id)).map((order: any) => [order.reference, orderDateTime(order.createdAt), order.fulfillmentDetails?.mode ?? '—', order.paymentStatus ?? '—', order.status === 'Received' ? 'Yes' : 'No', order.encounterReference ?? selectedEncounter?.encounterReference ?? '—'])} />}
-    {tab === 'insurance' && <div className="grid gap-5 lg:grid-cols-2"><div className={`${cardClass} p-5`}><h2 className="font-bold">Insurance details</h2>{patient.clinical.insurance ? <div className="mt-4 grid gap-4 sm:grid-cols-2"><Info label="Provider" value={patient.clinical.insurance.provider} /><Info label="Member number" value={patient.clinical.insurance.memberNumber} /><Info label="Plan" value={patient.clinical.insurance.plan} /><Info label="Expiration" value={patient.clinical.insurance.expirationDate} /></div> : <EmptyState text="No insurance record saved." />}</div><div className={`${cardClass} p-5`}><h2 className="font-bold">Claims</h2>{patient.clinical.claims.length ? <div className="mt-4 space-y-3">{patient.clinical.claims.map(claim => <div key={claim.id} className="flex items-center justify-between rounded-xl bg-muted/40 p-3 text-sm"><div><p className="font-semibold">{claim.reference}</p><p className="text-xs text-muted-foreground">{claim.relatedLabel}</p></div><StatusBadge value={claim.status} /></div>)}</div> : <EmptyState text="No claims submitted." />}</div></div>}
-    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900"><strong>Clinical record protection:</strong> SOAP notes, diagnoses, prescriptions, laboratory results, and other clinical records are read-only in the admin portal. Editing requires explicit clinical authorization.</div>
+    <button onClick={onBack} className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"><ArrowLeft className="h-4 w-4" /> Back to patient list</button>
+    <section className={`${cardClass} overflow-hidden`}>
+      <div className="bg-gradient-to-br from-primary/10 via-card to-card p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-4"><div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-xl font-bold text-primary-foreground">{patient.initials}</div><div><div className="flex flex-wrap items-center gap-2"><p className="text-xs font-bold uppercase tracking-widest text-primary">Patient records</p><StatusBadge value={patient.status} /></div><h1 className="mt-1 text-2xl font-bold">{patient.name}</h1><p className="mt-1 text-sm text-muted-foreground">Patient ID: <span className="font-mono">{patient.id}</span> · Last active {displayDate(patient.lastActive)}</p></div></div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"><strong>Read-only clinical access</strong><br />Editing requires explicit clinical permission.</div>
+        </div>
+        <div className="mt-5 grid gap-3 rounded-xl bg-background/70 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4"><Info label="Email" value={summary(patient.email)} /><Info label="Phone" value={summary(patient.phone)} /><Info label="Birthday" value={summary(patient.birthday)} /><Info label="Gender / blood type" value={`${summary(patient.gender)} · ${summary(patient.bloodType)}`} /></div>
+      </div>
+      <div className="grid gap-5 border-t border-border p-5 lg:grid-cols-2"><div><div className="mb-3 flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /><h2 className="font-bold">Insurance</h2></div>{insurance ? <div className="grid gap-3 text-sm sm:grid-cols-2"><Info label="Provider" value={summary(insurance.provider)} /><Info label="Plan" value={summary(insurance.plan)} /><Info label="Member number" value={summary(insurance.memberNumber)} /><Info label="Expiration" value={summary(insurance.expirationDate)} /></div> : <p className="text-sm text-muted-foreground">No insurance record saved.</p>}</div><div><div className="mb-3 flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /><h2 className="font-bold">Emergency contact</h2></div>{emergencyContact ? <div className="grid gap-3 text-sm sm:grid-cols-2"><Info label="Name" value={summary(emergencyContact.name)} /><Info label="Phone" value={summary(emergencyContact.number)} /></div> : <p className="text-sm text-muted-foreground">No emergency contact saved.</p>}</div></div>
+    </section>
+    <section className={`${cardClass} p-5`}><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-primary">Completed appointments</p><h2 className="mt-1 text-xl font-bold">Encounter history</h2><p className="mt-1 text-sm text-muted-foreground">Select a completed appointment to view only the records connected to it.</p></div><select aria-label="Select completed encounter" value={selectedEncounter?.id ?? ''} onChange={event => setSelectedEncounterId(event.target.value)} className={`${inputClass} lg:w-96`}><option value="">Select completed encounter</option>{completedEncounters.map(encounter => <option key={encounter.id} value={encounter.id}>{encounter.encounterReference} · {encounter.date}</option>)}</select></div>{selectedEncounter && <div className="mt-4 grid gap-3 rounded-xl bg-muted/40 p-4 text-sm sm:grid-cols-3"><Info label="Encounter" value={selectedEncounter.encounterReference} /><Info label="Attending doctor" value={`${selectedEncounter.doctor} · ${selectedEncounter.specialty}`} /><Info label="Appointment" value={`${summary(selectedEncounter.appointmentDetails?.date)} · ${summary(selectedEncounter.appointmentDetails?.time)}`} /></div>}</section>
+    <div className={`${cardClass} overflow-hidden`}><div className="flex gap-1 overflow-x-auto border-b border-border p-2">{tabs.map(([id, label]) => <button key={id} type="button" onClick={() => setTab(id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}</div><div className="p-5">{renderTab()}</div></div>
   </div>;
 }
 
-function Patients({ patients, onSelect, onUpdate }: { patients: AdminPatient[]; onSelect: (patient: AdminPatient) => void; onUpdate: (patient: AdminPatient) => void }) {
+function PillIcon(props: React.ComponentProps<typeof Package>) {
+  return <Package {...props} />;
+}
+
+function Patients({ patients, loading, onSelect }: { patients: AdminPatient[]; loading: boolean; onSelect: (patient: AdminPatient) => void }) {
   const [query, setQuery] = useState(''); const [status, setStatus] = useState('All'); const [page, setPage] = useState(1);
   const filtered = patients.filter(p => `${p.name} ${p.email} ${p.id}`.toLowerCase().includes(query.toLowerCase()) && (status === 'All' || p.status === status));
   const pageSize = 6; const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize)); const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
   const changeQuery = (value: string) => { setQuery(value); setPage(1); }; const changeStatus = (value: string) => { setStatus(value); setPage(1); };
-  return <div className="space-y-5"><PageHeading eyebrow="Patient management" title="Patient accounts" description="Search patients, review their complete profile, and manage account access." /><div className={`${cardClass} p-4`}><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => changeQuery(e.target.value)} placeholder="Search by name, email, or patient ID" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => changeStatus(e.target.value)} className={inputClass}><option>All</option><option>Active</option><option>Inactive</option></select></div></div><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Contact</th><th className="px-5 py-4">Last active</th><th className="px-5 py-4">Status</th><th className="px-5 py-4">Action</th></tr></thead><tbody className="divide-y divide-border">{visible.map(patient => <tr key={patient.id} className="hover:bg-muted/30"><td className="px-5 py-4"><button onClick={() => { onSelect(patient); addAuditEvent('Viewed patient profile', patient.name); }} className="flex items-center gap-3 text-left hover:text-primary"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{patient.initials}</span><span><span className="block font-bold">{patient.name}</span><span className="block text-xs text-muted-foreground">{patient.id}</span></span></button></td><td className="px-5 py-4 text-muted-foreground">{patient.email}<br />{patient.phone}</td><td className="px-5 py-4 text-muted-foreground">{new Date(patient.lastActive).toLocaleDateString('en-PH')}</td><td className="px-5 py-4"><StatusBadge value={patient.status} /></td><td className="px-5 py-4"><button onClick={() => onSelect(patient)} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Open profile <ChevronRight className="h-3 w-3" /></button></td></tr>)}</tbody></table>{!filtered.length && <EmptyState text="No patients match your filters." />}</div><div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground"><span>Showing {visible.length} of {filtered.length} patients</span><div className="flex items-center gap-2"><button disabled={page === 1} onClick={() => setPage(current => current - 1)} className="rounded-lg border border-border px-3 py-1.5 font-bold disabled:opacity-40">Previous</button><span>Page {page} of {pageCount}</span><button disabled={page === pageCount} onClick={() => setPage(current => current + 1)} className="rounded-lg border border-border px-3 py-1.5 font-bold disabled:opacity-40">Next</button></div></div></div></div>;
+  return <div className="space-y-5"><PageHeading eyebrow="Patient management" title="Patient records" description="Search the shared patient directory, then open a complete read-only record organized around completed encounters." /><div className={`${cardClass} p-4`}><div className="grid gap-3 md:grid-cols-[1fr_180px]"><div className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input value={query} onChange={e => changeQuery(e.target.value)} placeholder="Search by name, email, or patient ID" className={`${inputClass} pl-9`} /></div><select value={status} onChange={e => changeStatus(e.target.value)} className={inputClass}><option value="All">All account statuses</option><option value="Active">Active</option><option value="Inactive">Inactive</option></select></div></div><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Patient ID</th><th className="px-5 py-4">Email</th><th className="px-5 py-4">Account status</th><th className="px-5 py-4">Action</th></tr></thead><tbody className="divide-y divide-border">{loading ? Array.from({ length: 5 }, (_, index) => <tr key={`patient-skeleton-${index}`}><td className="px-5 py-5"><div className="h-4 w-40 animate-pulse rounded bg-muted" /></td><td className="px-5 py-5"><div className="h-4 w-24 animate-pulse rounded bg-muted" /></td><td className="px-5 py-5"><div className="h-4 w-48 animate-pulse rounded bg-muted" /></td><td className="px-5 py-5"><div className="h-6 w-16 animate-pulse rounded-full bg-muted" /></td><td className="px-5 py-5"><div className="h-4 w-20 animate-pulse rounded bg-muted" /></td></tr>) : visible.map(patient => <tr key={patient.id} className="hover:bg-muted/30"><td className="px-5 py-4"><button onClick={() => { onSelect(patient); addAuditEvent('Viewed patient profile', patient.name); }} className="flex items-center gap-3 text-left hover:text-primary"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-xs font-bold text-primary">{patient.initials}</span><span className="font-bold">{patient.name}</span></button></td><td className="px-5 py-4 font-mono text-xs text-muted-foreground">{patient.id}</td><td className="px-5 py-4 text-muted-foreground">{patient.email}</td><td className="px-5 py-4"><StatusBadge value={patient.status} /></td><td className="px-5 py-4"><button onClick={() => onSelect(patient)} className="inline-flex items-center gap-1 text-xs font-bold text-primary hover:underline">Open record <ChevronRight className="h-3 w-3" /></button></td></tr>)}</tbody></table>{!loading && !filtered.length && <EmptyState text="No patients match your filters." />}</div><div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted-foreground"><span>Showing {visible.length} of {filtered.length} patients</span><div className="flex items-center gap-2"><button disabled={page === 1} onClick={() => setPage(current => current - 1)} className="rounded-lg border border-border px-3 py-1.5 font-bold disabled:opacity-40">Previous</button><span>Page {page} of {pageCount}</span><button disabled={page === pageCount} onClick={() => setPage(current => current + 1)} className="rounded-lg border border-border px-3 py-1.5 font-bold disabled:opacity-40">Next</button></div></div></div></div>;
 }
 
 function Appointments({ patients, schedules, onSchedules, onPatients }: { patients: AdminPatient[]; schedules: AdminSchedule[]; onSchedules: (value: AdminSchedule[]) => void; onPatients: (value: AdminPatient[]) => void }) {
@@ -359,7 +426,6 @@ function Field({ name, label, defaultValue, type = 'text', step, required }: { n
   return <label className="block text-sm font-semibold">{label}<input name={name} type={type} step={step} defaultValue={defaultValue} required={required} className={`${inputClass} mt-1.5`} /></label>;
 }
 function Info({ label, value }: { label: string; value: string }) { return <div><p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</p><p className="mt-1 font-semibold">{value}</p></div>; }
-function SummaryLine({ label, value }: { label: string; value: string | number }) { return <div className="flex justify-between border-b border-border pb-2"><span className="text-muted-foreground">{label}</span><span className="font-bold">{value}</span></div>; }
 function SimpleTable({ columns, rows }: { columns: string[]; rows: any[][] }) { return <div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr>{columns.map(c => <th key={c} className="px-5 py-4">{c}</th>)}</tr></thead><tbody className="divide-y divide-border">{rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j} className="px-5 py-4 text-muted-foreground">{cell}</td>)}</tr>)}</tbody></table>{!rows.length && <EmptyState text="No records available." />}</div></div>; }
 function ReadOnlyBlock({ title, items }: { title: string; items: string[] }) { return <div className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Stethoscope className="h-4 w-4 text-primary" /><h2 className="font-bold">{title}</h2><span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Read-only</span></div><div className="mt-4 space-y-3">{items.map((item, i) => <pre key={i} className="whitespace-pre-wrap rounded-xl bg-muted/40 p-3 font-sans text-sm leading-relaxed text-muted-foreground">{item}</pre>)}{!items.length && <EmptyState text={`No ${title.toLowerCase()} available.`} />}</div></div>; }
 function SoapSection({ title, text }: { title: string; text: string }) {
@@ -370,33 +436,6 @@ function AdminImagingList({ records }: { records: ImagingRecord[] }) {
   return <><div className={`${cardClass} p-5`}><div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><ImageIcon className="h-5 w-5 text-primary" /><h2 className="text-lg font-bold">Imaging</h2></div><span className="text-xs text-muted-foreground">Read-only</span></div><div className="mt-4 grid gap-4 lg:grid-cols-2">{records.map(record => <div key={record.id} className="rounded-xl border border-border p-4"><div className="flex items-start justify-between gap-3"><div><p className="font-bold">{record.type} · {record.bodyArea}</p><p className="text-xs text-muted-foreground">{record.date} · {record.doctor}</p></div><StatusBadge value={record.status} /></div>{record.imageUrl && <button type="button" onClick={() => setSelected(record)} className="group relative mt-3 block w-full overflow-hidden rounded-lg bg-slate-900"><img src={record.imageUrl} alt={`${record.type} preview`} className="h-32 w-full object-cover transition group-hover:scale-[1.02]" /><span className="absolute bottom-2 right-2 inline-flex items-center gap-1 rounded-lg bg-black/70 px-2 py-1 text-[10px] font-bold text-white"><Maximize2 className="h-3 w-3" /> Open preview</span></button>}<div className="mt-3 space-y-2 text-sm"><p><strong>Findings:</strong> {record.findings}</p><p><strong>Impression:</strong> {record.impression}</p></div><button type="button" onClick={() => downloadImagingReport(record)} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-bold text-primary hover:bg-muted"><Download className="h-3.5 w-3.5" /> Download report</button></div>)}</div>{!records.length && <EmptyState text="No imaging records available." />}</div>{selected && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true" aria-label="Admin imaging preview"><div className="relative max-h-[95vh] max-w-5xl overflow-auto rounded-2xl bg-card p-3 shadow-2xl"><button type="button" onClick={() => setSelected(null)} className="absolute right-5 top-5 z-10 rounded-full bg-black/70 p-2 text-white"><X className="h-5 w-5" /></button><img src={selected.imageUrl} alt={`${selected.type} enlarged preview`} className="max-h-[82vh] w-full rounded-xl object-contain" /><p className="px-2 pt-3 text-sm font-bold">{selected.type} · {selected.bodyArea} · {selected.date}</p></div></div>}</>;
 }
 function EmptyState({ text }: { text: string }) { return <div className="p-10 text-center text-sm text-muted-foreground"><FileText className="mx-auto mb-3 h-8 w-8 opacity-30" />{text}</div>; }
-
-function AdminEncounterClinicalPanel({ encounters, selectedEncounterId, onSelect, canEditClinical, editSoapNote }: { encounters: Encounter[]; selectedEncounterId: string; onSelect: (id: string) => void; canEditClinical: boolean; editSoapNote: (note: any) => void }) {
-  const encounter = encounters.find(item => item.id === selectedEncounterId) ?? encounters[0];
-  if (!encounter) {
-    return <div className={`${cardClass} p-5`}><h2 className="font-bold">Clinical records</h2><EmptyState text="No completed encounter yet. Mark a confirmed appointment as Completed to create one." /></div>;
-  }
-  const items = (values: any[], empty: string, formatter: (value: any) => string) => values.length ? values.map(formatter) : [empty];
-  return <div className="space-y-5">
-    <div className={`${cardClass} p-5`}>
-      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div><p className="text-xs font-bold uppercase tracking-widest text-primary">Encounter</p><h2 className="mt-1 text-xl font-bold">{encounter.encounterReference}</h2><p className="mt-1 text-sm text-muted-foreground">{encounter.date} · {encounter.doctor} · {encounter.specialty}</p><p className="text-xs text-muted-foreground">{encounter.clinic} · Appointment {encounter.appointmentId}</p></div>
-        <select value={encounter.id} onChange={event => onSelect(event.target.value)} className={inputClass + ' md:w-72'}>{encounters.map(item => <option key={item.id} value={item.id}>{item.encounterReference} · {item.date}</option>)}</select>
-      </div>
-      <div className="mt-4 grid gap-3 rounded-xl bg-muted/40 p-4 text-sm sm:grid-cols-2"><Info label="Patient" value={encounter.patientName} /><Info label="Chief complaint" value={encounter.chiefComplaint} /><Info label="Appointment" value={`${encounter.appointmentDetails.date} · ${encounter.appointmentDetails.time}`} /><Info label="Attending doctor" value={encounter.doctor} /></div>
-    </div>
-    <div className={`${cardClass} p-5`}>
-      <div className="flex items-center justify-between"><h2 className="font-bold">SOAP notes</h2><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${canEditClinical ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{canEditClinical ? 'Clinical editing enabled' : 'Read-only'}</span></div>
-      {encounter.soapNotes.length ? <div className="mt-4 space-y-4">{encounter.soapNotes.map((note: any) => <div key={note.id} className="rounded-xl border border-border p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-bold">{note.doctor}</p><p className="text-xs text-muted-foreground">{note.date} · {note.consultationReference}</p></div>{canEditClinical && <button type="button" onClick={() => editSoapNote(note)} className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-bold hover:bg-muted"><Pencil className="mr-1 inline h-3 w-3" /> Edit</button>}</div><div className="mt-3 grid gap-3 md:grid-cols-2"><SoapSection title="Subjective" text={note.subjective} /><SoapSection title="Objective" text={note.objective} /><SoapSection title="Assessment" text={note.assessment} /><SoapSection title="Plan" text={note.plan} /></div></div>)}</div> : <EmptyState text="This encounter has no SOAP notes yet." />}
-    </div>
-    <ReadOnlyBlock title="Diagnoses" items={items(encounter.diagnoses, 'This encounter has no diagnoses yet.', item => `${item.code} · ${item.description} · ${item.status} · ${item.date}`)} />
-    <ReadOnlyBlock title="Prescriptions & medications" items={items([...encounter.prescriptions, ...encounter.medications], 'This encounter has no prescriptions or medications yet.', item => `${item.name} · ${item.dosage ?? ''} · ${item.instructions ?? ''}`)} />
-    <ReadOnlyBlock title="Vitals" items={items(encounter.vitals, 'This encounter has no vitals yet.', item => `${item.date}: BP ${item.systolic}/${item.diastolic}, HR ${item.heartRate}, Temp ${item.temp}, Weight ${item.weight}`)} />
-    <ReadOnlyBlock title="Laboratory results" items={items(encounter.laboratoryResults, 'This encounter has no laboratory results yet.', item => `${item.test} · ${item.result} · ${item.status} · ${item.date}`)} />
-    <ReadOnlyBlock title="Imaging" items={items(encounter.imaging, 'This encounter has no imaging records yet.', item => `${item.type} · ${item.bodyArea} · ${item.impression} · ${item.date}`)} />
-    <ReadOnlyBlock title="Clinical summary" items={encounter.clinicalSummary ? [encounter.clinicalSummary] : ['This encounter has no clinical summary yet.']} />
-  </div>;
-}
 
 function toAdminPatients(remotePatients: ServerPatient[], localPatients: AdminPatient[]): AdminPatient[] {
   return remotePatients.map((remote) => {
@@ -480,6 +519,7 @@ export default function Admin() {
   const [, setLocation] = useLocation();
   const [section, setSection] = useState<Section>('overview');
   const [patients, setPatients] = useState<AdminPatient[]>([]);
+  const [patientsLoading, setPatientsLoading] = useState(true);
   const [medications, setMedications] = useState<AdminMedication[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [payments, setPayments] = useState<AdminPayment[]>([]);
@@ -534,6 +574,9 @@ export default function Admin() {
           setPatients([]);
           setPayments([]);
         }
+      })
+      .finally(() => {
+        if (active) setPatientsLoading(false);
       });
     return () => {
       active = false;
@@ -570,9 +613,9 @@ export default function Admin() {
     void serverSaveAdminSchedules(value).then(({ schedules: saved }) => setSchedules(saved as AdminSchedule[])).catch(() => undefined);
   };
   const handleLogout = () => { logout(); setLocation('/login'); };
-  const content = selectedPatient ? <PatientProfile patient={selectedPatient} payments={payments} orders={orders} onBack={() => setSelectedPatient(null)} onUpdate={patient => { updatePatients(patients.map(p => p.id === patient.id ? patient : p)); setSelectedPatient(patient); }} /> :
+  const content = selectedPatient ? <AdminPatientRecords patient={selectedPatient} payments={payments} orders={orders} onBack={() => setSelectedPatient(null)} /> :
     section === 'overview' ? <Overview patients={patients} appointments={appointments} payments={payments} medications={medications} orders={orders} /> :
-    section === 'patients' ? <Patients patients={patients} onSelect={setSelectedPatient} onUpdate={patient => updatePatients(patients.map(p => p.id === patient.id ? patient : p))} /> :
+    section === 'patients' ? <Patients patients={patients} loading={patientsLoading} onSelect={setSelectedPatient} /> :
     section === 'appointments' ? <Appointments patients={patients} schedules={schedules} onSchedules={updateSchedules} onPatients={updatePatients} /> :
     section === 'payments' ? <Payments payments={payments} /> :
     section === 'medications' ? <Medications medications={medications} onMedications={updateMedications} /> :

@@ -12,6 +12,7 @@ export const usersTable = pgTable("sugbodoc_users", {
   birthday: text("birthday").notNull().default(""),
   gender: text("gender").notNull().default(""),
   bloodType: text("blood_type").notNull().default(""),
+  emergencyContact: jsonb("emergency_contact").$type<{ name: string; number: string } | null>(),
   role: text("role").notNull().default("Patient"),
   status: text("status").notNull().default("Active"),
   clinicalEditingPermission: text("clinical_editing_permission").notNull().default("false"),
