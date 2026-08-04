@@ -172,10 +172,24 @@ function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: A
   );
   const selectedEncounter = completedEncounters.find(item => item.id === selectedEncounterId) ?? completedEncounters[0];
   const selectedOrders = selectedEncounter
-    ? orders.filter(order => order.patientId === patient.id && order.encounterId === selectedEncounter.id)
+    ? [
+        ...orders.filter(order => order.patientId === patient.id && order.encounterId === selectedEncounter.id),
+        ...((selectedEncounter.pharmacyOrders ?? []) as any[]).map(order => ({
+          ...order,
+          patientId: patient.id,
+          encounterId: selectedEncounter.id,
+        })),
+      ].filter((order, index, all) => all.findIndex(item => item.reference === order.reference) === index)
     : [];
   const selectedPayments = selectedEncounter
     ? [
+        ...((selectedEncounter.payments ?? []) as any[]).map(payment => ({
+          ...payment,
+          patientId: patient.id,
+          patientName: patient.name,
+          encounterId: selectedEncounter.id,
+          encounterReference: selectedEncounter.encounterReference,
+        })),
         ...(selectedEncounter.billing?.payments ?? []).map(payment => ({
           ...payment,
           patientId: patient.id,

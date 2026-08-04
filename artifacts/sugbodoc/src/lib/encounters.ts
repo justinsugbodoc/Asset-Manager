@@ -49,6 +49,7 @@ export type Encounter = {
   prescriptions: any[];
   medications: any[];
   pharmacyOrders: any[];
+  payments?: any[];
   bills?: any[];
   vitals: any[];
   laboratoryResults: any[];

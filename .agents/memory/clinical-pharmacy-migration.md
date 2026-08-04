@@ -15,6 +15,12 @@ Completed appointments are the source of truth for encounter creation: use appoi
 
 **How to apply:** Create encounters only from Confirmed → Completed transitions, expose encounter selectors in clinical views, and keep patient data read-only unless the session is an authorized clinical user.
 
+Demo clinical fixtures must use a unique database ID for every encounter/category record; never derive a shared or optional ID from nested order data.
+
+**Why:** A non-unique pharmacy fixture ID caused later encounter orders to overwrite earlier rows, leaving apparently complete encounters without pharmacy data.
+
+**How to apply:** Build deterministic IDs from encounter ID plus record category, and verify category coverage across every seeded encounter after each fixture run.
+
 For Gmail SMTP, use `smtp.gmail.com` as the host; `smtp@gmail.com` is an email address-like value and causes DNS `ENOTFOUND` failures.
 
 **Why:** Appointment confirmation emails failed at DNS resolution before authentication could run.
