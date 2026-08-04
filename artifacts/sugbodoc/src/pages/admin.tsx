@@ -35,8 +35,6 @@ import {
 } from '@/lib/server';
 
 type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
-type AdminRecordsTab = 'encounters' | 'vitals' | 'soap' | 'diagnoses' | 'prescriptions' | 'labs' | 'imaging' | 'billing' | 'payments' | 'pharmacy';
-
 const sectionItems: Array<{ id: Section; label: string; icon: any }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'patients', label: 'Patients', icon: Users },
@@ -140,7 +138,6 @@ function Overview({ patients, appointments, payments, medications, orders }: { p
 }
 
 function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: AdminPatient; payments: AdminPayment[]; orders: AdminOrder[]; onBack: () => void }) {
-  const [tab, setTab] = useState<AdminRecordsTab>('encounters');
   const [encounters, setEncounters] = useState<Encounter[]>(() => patient.clinical.encounters as Encounter[]);
   const [selectedEncounterId, setSelectedEncounterId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -190,18 +187,6 @@ function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: A
       ].filter((payment, index, all) => all.findIndex(item => (item.id && item.id === payment.id) || (item.reference && item.reference === payment.reference)) === index)
     : [];
   const selectedBills = selectedEncounter?.bills ?? [];
-  const tabs: Array<[AdminRecordsTab, string]> = [
-    ['encounters', 'Encounters'],
-    ['vitals', 'Vitals'],
-    ['soap', 'SOAP Notes'],
-    ['diagnoses', 'Diagnoses'],
-    ['prescriptions', 'Prescriptions'],
-    ['labs', 'Lab Results'],
-    ['imaging', 'Imaging'],
-    ['billing', 'Billing'],
-    ['payments', 'Payments'],
-    ['pharmacy', 'Pharmacy Orders'],
-  ];
 
   useEffect(() => {
     if (selectedEncounter && selectedEncounter.id !== selectedEncounterId) {
@@ -215,44 +200,40 @@ function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: A
   const recordScope = <span className="ml-auto rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-primary">Encounter-scoped</span>;
   const empty = (text: string) => <EmptyState text={text} />;
   const table = (columns: string[], rows: any[][], text: string) => rows.length ? <SimpleTable columns={columns} rows={rows} /> : empty(text);
+  const paymentDescription = (payment: any) =>
+    payment.description
+    ?? payment.billDescription
+    ?? (payment.orderReference ? `Pharmacy order ${payment.orderReference}` : undefined)
+    ?? payment.reference
+    ?? 'Payment';
+  const paymentDate = (payment: any) => displayDate(payment.paymentDate ?? payment.date ?? payment.createdAt);
 
-  const renderTab = () => {
+  const renderRecords = () => {
     if (loading) {
       return <div className="space-y-4">{Array.from({ length: 3 }, (_, index) => <div key={`record-skeleton-${index}`} className={`${cardClass} h-36 animate-pulse bg-muted/40`} />)}</div>;
     }
     if (error) return <div className={`${cardClass} p-6`}>{empty(error)}</div>;
     if (!selectedEncounter) return <div className={`${cardClass} p-6`}>{empty('No completed appointment has a clinical encounter yet.')}</div>;
 
-    if (tab === 'encounters') {
-      return <div className="space-y-4">{completedEncounters.map(encounter => <button key={encounter.id} type="button" onClick={() => { setSelectedEncounterId(encounter.id); setTab('soap'); }} className={`${cardClass} w-full p-5 text-left transition hover:border-primary/50 ${encounter.id === selectedEncounter.id ? 'border-primary ring-2 ring-primary/10' : ''}`}><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-widest text-primary">{encounter.encounterReference}</p><h2 className="mt-1 text-lg font-bold">{encounter.chiefComplaint || 'Completed consultation'}</h2><p className="mt-1 text-sm text-muted-foreground">{encounter.date} · {encounter.doctor} · {encounter.specialty}</p></div><StatusBadge value="Completed" /></div><div className="mt-4 grid gap-3 rounded-xl bg-muted/40 p-4 text-sm sm:grid-cols-3"><Info label="Clinic" value={summary(encounter.clinic)} /><Info label="Appointment" value={`${summary(encounter.appointmentDetails?.date)} · ${summary(encounter.appointmentDetails?.time)}`} /><Info label="Summary" value={summary(encounter.clinicalSummary)} /></div></button>)}</div>;
-    }
-    if (tab === 'vitals') {
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><HeartPulse className="h-5 w-5 text-primary" /><h2 className="font-bold">Vitals</h2>{recordScope}</div>{table(['Date', 'Blood pressure', 'Heart rate', 'Temperature', 'Weight'], selectedEncounter.vitals.map((vital: any) => [vital.date, vital.systolic != null ? `${vital.systolic}/${vital.diastolic} mmHg` : '—', vital.heartRate ? `${vital.heartRate} bpm` : '—', vital.temp ? `${vital.temp} °C` : '—', vital.weight ? `${vital.weight} kg` : '—']), 'No vitals are recorded for this encounter.')}</section>;
-    }
-    if (tab === 'soap') {
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-primary" /><h2 className="font-bold">SOAP Notes</h2>{recordScope}<span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">Read-only</span></div>{selectedEncounter.soapNotes.length ? <div className="mt-4 space-y-4">{selectedEncounter.soapNotes.map((note: any) => <div key={note.id} className="rounded-xl border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3"><div><p className="font-bold">{note.doctor}</p><p className="text-xs text-muted-foreground">{note.date} · {note.consultationReference}</p></div><StatusBadge value={note.status ?? 'Signed'} /></div><div className="mt-4 grid gap-3 md:grid-cols-2"><SoapSection title="Subjective" text={note.subjective} /><SoapSection title="Objective" text={note.objective} /><SoapSection title="Assessment" text={note.assessment} /><SoapSection title="Plan" text={note.plan} /></div></div>)}</div> : <div className="mt-4">{empty('No SOAP notes are recorded for this encounter.')}</div>}</section>;
-    }
-    if (tab === 'diagnoses') {
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Activity className="h-5 w-5 text-primary" /><h2 className="font-bold">Diagnoses</h2>{recordScope}</div>{table(['Code', 'Description', 'Status', 'Date'], selectedEncounter.diagnoses.map((diagnosis: any) => [diagnosis.code ?? '—', diagnosis.description ?? '—', diagnosis.status ?? '—', diagnosis.date ?? '—']), 'No diagnoses are recorded for this encounter.')}</section>;
-    }
-    if (tab === 'prescriptions') {
-      const prescriptions = [...selectedEncounter.prescriptions, ...selectedEncounter.medications];
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><PillIcon className="h-5 w-5 text-primary" /><h2 className="font-bold">Prescriptions</h2>{recordScope}</div>{table(['Medication', 'Dosage', 'Instructions', 'Status'], prescriptions.map((prescription: any) => [prescription.name ?? '—', prescription.dosage ?? '—', prescription.instructions ?? '—', prescription.status ?? '—']), 'No prescriptions are recorded for this encounter.')}</section>;
-    }
-    if (tab === 'labs') {
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FlaskConical className="h-5 w-5 text-primary" /><h2 className="font-bold">Laboratory Results</h2>{recordScope}</div>{table(['Test', 'Result', 'Reference range', 'Date', 'Status'], selectedEncounter.laboratoryResults.map((lab: any) => [lab.test ?? '—', lab.result ?? '—', lab.range ?? '—', lab.date ?? '—', lab.status ?? '—']), 'No laboratory results are recorded for this encounter.')}</section>;
-    }
-    if (tab === 'imaging') {
-      return <AdminImagingList records={(selectedEncounter.imaging ?? []) as ImagingRecord[]} />;
-    }
-    if (tab === 'billing') {
-      const billing = selectedEncounter.billing ?? {} as any;
-      return <div className="space-y-5"><section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /><h2 className="font-bold">Encounter billing</h2>{recordScope}</div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[['Consultation fee', billing.consultationFee], ['Laboratory charges', billing.laboratoryCharges], ['Imaging charges', billing.imagingCharges], ['Pharmacy charges', billing.pharmacyCharges], ['Insurance coverage', billing.insuranceCoverage], ['Payments', selectedPayments.reduce((sum, payment: any) => sum + Number(payment.amount ?? 0), 0)]].map(([label, amount]) => <div key={String(label)} className="rounded-xl bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-bold">{money(Number(amount ?? 0))}</p></div>)}</div></section>{table(['Description', 'Date', 'Amount', 'Status', 'Bill reference'], selectedBills.map((bill: any) => [bill.description ?? '—', bill.date ?? '—', money(Number(bill.amount ?? 0)), bill.status ?? '—', bill.id ?? '—']), 'No bills are linked to this encounter.')}</div>;
-    }
-    if (tab === 'payments') {
-      return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><CreditCard className="h-5 w-5 text-primary" /><h2 className="font-bold">Payments</h2>{recordScope}</div>{table(['Description', 'Payment date', 'Amount', 'Reference', 'Status'], selectedPayments.map((payment: any) => [payment.description ?? '—', payment.date ?? '—', money(Number(payment.amount ?? 0)), payment.reference ?? '—', payment.status ?? '—']), 'No payments are linked to this encounter.')}</section>;
-    }
-    return <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Truck className="h-5 w-5 text-primary" /><h2 className="font-bold">Pharmacy Orders</h2>{recordScope}</div>{table(['Order', 'Order date', 'Fulfillment', 'Payment', 'Amount', 'Received'], selectedOrders.map(order => [order.reference, orderDateTime(order.createdAt), order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup', order.paymentStatus ?? '—', money(Number((order as any).paymentAmount ?? order.totals?.total ?? 0)), order.receivedAt ? orderDateTime(order.receivedAt) : 'Not confirmed']), 'No pharmacy orders are linked to this encounter.')}</section>;
+    const billing = selectedEncounter.billing ?? {} as any;
+    const prescriptions = [...selectedEncounter.prescriptions, ...selectedEncounter.medications];
+    return <div className="space-y-5">
+      <section className={`${cardClass} p-5`}>
+        <div className="flex items-center gap-2"><HeartPulse className="h-5 w-5 text-primary" /><h2 className="font-bold">Vitals</h2>{recordScope}</div>
+        <div className="mt-4">{table(['Date', 'Blood pressure', 'Heart rate', 'Temperature', 'Weight'], selectedEncounter.vitals.map((vital: any) => [vital.date, vital.systolic != null ? `${vital.systolic}/${vital.diastolic} mmHg` : '—', vital.heartRate ? `${vital.heartRate} bpm` : '—', vital.temp ? `${vital.temp} °C` : '—', vital.weight ? `${vital.weight} kg` : '—']), 'No vitals are recorded for this encounter.')}</div>
+      </section>
+      <section className={`${cardClass} p-5`}>
+        <div className="flex items-center gap-2"><Stethoscope className="h-5 w-5 text-primary" /><h2 className="font-bold">SOAP Notes</h2>{recordScope}<span className="rounded-full bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase text-amber-800">Read-only</span></div>
+        {selectedEncounter.soapNotes.length ? <div className="mt-4 space-y-4">{selectedEncounter.soapNotes.map((note: any) => <div key={note.id} className="rounded-xl border border-border p-4"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3"><div><p className="font-bold">{note.doctor}</p><p className="text-xs text-muted-foreground">{note.date} · {note.consultationReference}</p></div><StatusBadge value={note.status ?? 'Signed'} /></div><div className="mt-4 grid gap-3 md:grid-cols-2"><SoapSection title="Subjective" text={note.subjective} /><SoapSection title="Objective" text={note.objective} /><SoapSection title="Assessment" text={note.assessment} /><SoapSection title="Plan" text={note.plan} /></div></div>)}</div> : <div className="mt-4">{empty('No SOAP notes are recorded for this encounter.')}</div>}
+      </section>
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Activity className="h-5 w-5 text-primary" /><h2 className="font-bold">Diagnoses</h2>{recordScope}</div><div className="mt-4">{table(['Code', 'Description', 'Status', 'Date'], selectedEncounter.diagnoses.map((diagnosis: any) => [diagnosis.code ?? '—', diagnosis.description ?? '—', diagnosis.status ?? '—', diagnosis.date ?? '—']), 'No diagnoses are recorded for this encounter.')}</div></section>
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><PillIcon className="h-5 w-5 text-primary" /><h2 className="font-bold">Prescriptions</h2>{recordScope}</div><div className="mt-4">{table(['Medication', 'Dosage', 'Instructions', 'Status'], prescriptions.map((prescription: any) => [prescription.name ?? '—', prescription.dosage ?? '—', prescription.instructions ?? '—', prescription.status ?? '—']), 'No prescriptions are recorded for this encounter.')}</div></section>
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FlaskConical className="h-5 w-5 text-primary" /><h2 className="font-bold">Laboratory Results</h2>{recordScope}</div><div className="mt-4">{table(['Test', 'Result', 'Reference range', 'Date', 'Status'], selectedEncounter.laboratoryResults.map((lab: any) => [lab.test ?? '—', lab.result ?? '—', lab.range ?? '—', lab.date ?? '—', lab.status ?? '—']), 'No laboratory results are recorded for this encounter.')}</div></section>
+      <AdminImagingList records={(selectedEncounter.imaging ?? []) as ImagingRecord[]} />
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><FileText className="h-5 w-5 text-primary" /><h2 className="font-bold">Encounter Billing</h2>{recordScope}</div><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[['Consultation fee', billing.consultationFee], ['Laboratory charges', billing.laboratoryCharges], ['Imaging charges', billing.imagingCharges], ['Pharmacy charges', billing.pharmacyCharges], ['Insurance coverage', billing.insuranceCoverage], ['Payments', selectedPayments.reduce((sum, payment: any) => sum + Number(payment.amount ?? 0), 0)]].map(([label, amount]) => <div key={String(label)} className="rounded-xl bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 font-bold">{money(Number(amount ?? 0))}</p></div>)}</div><div className="mt-4">{table(['Description', 'Bill date', 'Amount', 'Status', 'Bill reference'], selectedBills.map((bill: any) => [bill.description ?? '—', displayDate(bill.date), money(Number(bill.amount ?? 0)), bill.status ?? '—', bill.id ?? '—']), 'No bills are linked to this encounter.')}</div></section>
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><CreditCard className="h-5 w-5 text-primary" /><h2 className="font-bold">Payments</h2>{recordScope}</div><div className="mt-4">{table(['Description', 'Payment date', 'Amount', 'Reference', 'Status'], selectedPayments.map((payment: any) => [paymentDescription(payment), paymentDate(payment), money(Number(payment.amount ?? 0)), payment.reference ?? '—', payment.status ?? '—']), 'No payments are linked to this encounter.')}</div></section>
+      <section className={`${cardClass} p-5`}><div className="flex items-center gap-2"><Truck className="h-5 w-5 text-primary" /><h2 className="font-bold">Pharmacy Orders</h2>{recordScope}</div><div className="mt-4">{table(['Order', 'Order date', 'Fulfillment', 'Payment', 'Amount', 'Received'], selectedOrders.map(order => [order.reference, orderDateTime(order.createdAt), order.fulfillmentDetails?.mode === 'delivery' ? 'Delivery' : 'Pickup', order.paymentStatus ?? '—', money(Number((order as any).paymentAmount ?? order.totals?.total ?? 0)), order.receivedAt ? orderDateTime(order.receivedAt) : 'Not confirmed']), 'No pharmacy orders are linked to this encounter.')}</div></section>
+    </div>;
   };
 
   return <div className="space-y-5">
@@ -268,7 +249,7 @@ function AdminPatientRecords({ patient, payments, orders, onBack }: { patient: A
       <div className="grid gap-5 border-t border-border p-5 lg:grid-cols-2"><div><div className="mb-3 flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" /><h2 className="font-bold">Insurance</h2></div>{insurance ? <div className="grid gap-3 text-sm sm:grid-cols-2"><Info label="Provider" value={summary(insurance.provider)} /><Info label="Plan" value={summary(insurance.plan)} /><Info label="Member number" value={summary(insurance.memberNumber)} /><Info label="Expiration" value={summary(insurance.expirationDate)} /></div> : <p className="text-sm text-muted-foreground">No insurance record saved.</p>}</div><div><div className="mb-3 flex items-center gap-2"><UserRound className="h-4 w-4 text-primary" /><h2 className="font-bold">Emergency contact</h2></div>{emergencyContact ? <div className="grid gap-3 text-sm sm:grid-cols-2"><Info label="Name" value={summary(emergencyContact.name)} /><Info label="Phone" value={summary(emergencyContact.number)} /></div> : <p className="text-sm text-muted-foreground">No emergency contact saved.</p>}</div></div>
     </section>
     <section className={`${cardClass} p-5`}><div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-primary">Completed appointments</p><h2 className="mt-1 text-xl font-bold">Encounter history</h2><p className="mt-1 text-sm text-muted-foreground">Select a completed appointment to view only the records connected to it.</p></div><select aria-label="Select completed encounter" value={selectedEncounter?.id ?? ''} onChange={event => setSelectedEncounterId(event.target.value)} className={`${inputClass} lg:w-96`}><option value="">Select completed encounter</option>{completedEncounters.map(encounter => <option key={encounter.id} value={encounter.id}>{encounter.encounterReference} · {encounter.date}</option>)}</select></div>{selectedEncounter && <div className="mt-4 grid gap-3 rounded-xl bg-muted/40 p-4 text-sm sm:grid-cols-3"><Info label="Encounter" value={selectedEncounter.encounterReference} /><Info label="Attending doctor" value={`${selectedEncounter.doctor} · ${selectedEncounter.specialty}`} /><Info label="Appointment" value={`${summary(selectedEncounter.appointmentDetails?.date)} · ${summary(selectedEncounter.appointmentDetails?.time)}`} /></div>}</section>
-    <div className={`${cardClass} overflow-hidden`}><div className="flex gap-1 overflow-x-auto border-b border-border p-2">{tabs.map(([id, label]) => <button key={id} type="button" onClick={() => setTab(id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-xs font-bold transition ${tab === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted'}`}>{label}</button>)}</div><div className="p-5">{renderTab()}</div></div>
+     <section className={`${cardClass} overflow-hidden`}><div className="border-b border-border bg-muted/30 p-4"><p className="text-xs font-bold uppercase tracking-widest text-primary">Complete encounter record</p><p className="mt-1 text-sm text-muted-foreground">All clinical, billing, payment, and pharmacy details are shown on this page.</p></div><div className="p-5">{renderRecords()}</div></section>
   </div>;
 }
 

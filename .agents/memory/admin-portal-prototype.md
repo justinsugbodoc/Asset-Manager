@@ -14,3 +14,9 @@ SugboDoc accounts, appointments, and Admin operations use PostgreSQL-backed API 
 **Why:** The user explicitly requested that patients registered on the published app be visible to administrators on another browser or device.
 
 **How to apply:** New accounts register through the shared API. Keep clinical records read-only by default and preserve only explicitly scoped demo-data migrations.
+
+The Admin patient record workspace presents all selected-encounter sections in one continuous scrollable page; the encounter selector remains the only record-level navigation control, and payments show explicit descriptions and payment dates.
+
+**Why:** Users found switching between separate clinical, billing, payment, and pharmacy tabs tiring and needed payment context to be immediately understandable.
+
+**How to apply:** Keep vitals, SOAP notes, diagnoses, prescriptions, labs, imaging, billing, payments, and pharmacy orders together for the selected completed encounter. Preserve read-only clinical access and encounter scoping.
