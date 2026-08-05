@@ -7,4 +7,4 @@ Stripe Checkout success is only a payment signal. The authenticated server confi
 
 **Why:** Frontend-only success handling left Stripe-paid bills Pending in the database and caused stale pending states after refresh or in the Admin portal.
 
-**How to apply:** Pass bill IDs in checkout metadata, enforce patient ownership server-side, make confirmation idempotent with database uniqueness/locking, load pending/history from database status, and project encounter and pharmacy bills/payments into both portals.
+**How to apply:** Pass bill IDs in checkout metadata, enforce patient ownership server-side, make confirmation idempotent with database uniqueness/locking, load pending/history from database status, and project encounter and pharmacy bills/payments into both portals. Completing a Doctor appointment creates or refreshes an unpaid encounter bill; only confirmed Stripe payment may change it to Paid.

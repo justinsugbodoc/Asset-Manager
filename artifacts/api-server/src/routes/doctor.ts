@@ -129,6 +129,61 @@ async function ensureAppointmentEncounter(
   return created ? (await loadPatientEncounters(patient.id)).find(item => item.id === id) ?? null : null;
 }
 
+function appointmentBill(appointment: typeof appointmentsTable.$inferSelect, encounter: Record<string, any>) {
+  const appointmentData = appointment.data as Record<string, any>;
+  const billing = encounter.billing as Record<string, any> | undefined;
+  const configuredAmount = Number(appointmentData.billing?.originalAmount ?? 0);
+  const recordedCharges = [
+    billing?.consultationFee,
+    billing?.laboratoryCharges,
+    billing?.imagingCharges,
+    billing?.procedureCharges,
+    billing?.pharmacyCharges,
+  ].reduce((total, value) => total + Number(value ?? 0), 0);
+  const amount = recordedCharges > 0 ? recordedCharges : configuredAmount;
+  const billId = `bill_${appointment.id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return {
+    id: billId,
+    appointmentId: appointment.id,
+    encounterId: encounter.id,
+    encounterReference: encounter.encounterReference,
+    billReference: `BILL-${appointment.reference}`,
+    description: `${appointmentData.visitType ?? "Consultation"} - ${appointmentData.doctor?.name ?? "SugboDoc"}`,
+    date: appointment.date,
+    amount,
+    status: "Pending",
+    insuranceCoverage: Number(appointmentData.billing?.estimatedInsuranceCoverage ?? billing?.insuranceCoverage ?? 0),
+  };
+}
+
+async function ensureCompletedAppointmentBill(
+  appointment: typeof appointmentsTable.$inferSelect,
+  patient: typeof usersTable.$inferSelect,
+  encounter: Record<string, any>,
+) {
+  const bills = Array.isArray(encounter.bills) ? encounter.bills : [];
+  const existingBill = bills.find((bill: any) =>
+    bill.appointmentId === appointment.id || bill.id === `bill_${appointment.id}`,
+  );
+  const bill = appointmentBill(appointment, encounter);
+  if (existingBill?.status === "Paid") return encounter;
+  const nextBills = existingBill
+    ? bills.map((item: any) => item.id === existingBill.id ? { ...item, ...bill, status: item.status ?? "Pending" } : item)
+    : [...bills, bill];
+  const billing = encounter.billing ?? {};
+  await db.delete((await import("@workspace/db")).clinicalRecordsTable)
+    .where(eq((await import("@workspace/db")).clinicalRecordsTable.encounterId, encounter.id));
+  await upsertEncounter(patient.id, {
+    ...encounter,
+    bills: nextBills,
+    billing: {
+      ...billing,
+      relatedBillIds: [...new Set([...(billing.relatedBillIds ?? []), existingBill?.id ?? bill.id])],
+    },
+  });
+  return (await loadPatientEncounters(patient.id)).find(item => item.id === encounter.id) ?? encounter;
+}
+
 async function patientSummary(patientId: string, doctorId: string) {
   const patient = await db.select().from(usersTable).where(and(eq(usersTable.id, patientId), eq(usersTable.role, "Patient"))).limit(1);
   if (!patient[0] || !(await doctorCanAccessPatient({ role: "Doctor", providerId: doctorId } as any, patientId))) return null;
@@ -226,6 +281,9 @@ router.patch("/doctor/appointments/:id/status", async (req, res): Promise<void> 
   let encounter = null;
   if (parsed.data.status === "In Progress" || parsed.data.status === "Completed") {
     encounter = await ensureAppointmentEncounter(updated, patient, doctor, parsed.data.status);
+    if (parsed.data.status === "Completed" && encounter) {
+      encounter = await ensureCompletedAppointmentBill(updated, patient, encounter);
+    }
   }
   await recordAudit(doctor.name, `Marked appointment ${parsed.data.status.toLowerCase()}`, updated.reference);
   res.json({ appointment: toAppointment(updated), encounter });
