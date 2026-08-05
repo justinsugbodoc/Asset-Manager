@@ -1,34 +1,19 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { useEffect, useState } from 'react';
 import { Home, Calendar, FileText, MessageSquare, CreditCard, User, Bell, Pill, ShieldCheck, LogOut, PanelLeftClose, PanelLeftOpen, EyeOff } from 'lucide-react';
 import Logo from '@/components/brand/logo';
 import { useAuth } from '@/hooks/use-auth';
+import { useSidebarMode } from '@/hooks/use-sidebar-mode';
 
 type ShellProps = {
   children: ReactNode;
   title: string;
 };
 
-type SidebarMode = 'expanded' | 'collapsed' | 'hidden';
-
-const SIDEBAR_MODE_KEY = 'sugbodoc_patient_sidebar_mode';
-
 export default function AppShell({ children, title }: ShellProps) {
   const [location, setLocation] = useLocation();
   const { logout } = useAuth();
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('expanded');
-
-  useEffect(() => {
-    const savedMode = window.localStorage.getItem(SIDEBAR_MODE_KEY);
-    if (savedMode === 'expanded' || savedMode === 'collapsed' || savedMode === 'hidden') {
-      setSidebarMode(savedMode);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, sidebarMode);
-  }, [sidebarMode]);
+  const { sidebarMode, setSidebarMode } = useSidebarMode();
 
   const navItems = [
     { icon: Home, label: 'Home', path: '/' },

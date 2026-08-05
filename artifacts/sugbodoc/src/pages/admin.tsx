@@ -3,10 +3,11 @@ import {
   Activity, AlertCircle, ArrowLeft, CalendarDays, Check, ChevronRight, ClipboardList,
   CreditCard, FileCheck2, FileText, Filter, LayoutDashboard, LogOut, Menu, Package,
   MessageSquare, Pencil, Plus, Search, Send, Settings2, ShieldCheck, Stethoscope, Trash2, Truck, Users, X,
-  Download, Image as ImageIcon, Maximize2, FlaskConical, HeartPulse, UserRound,
+  Download, Image as ImageIcon, Maximize2, FlaskConical, HeartPulse, UserRound, PanelLeftClose, PanelLeftOpen, EyeOff,
 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import { getCurrentSessionUser, useAuth } from '@/hooks/use-auth';
+import { useSidebarMode } from '@/hooks/use-sidebar-mode';
 import { useToast } from '@/hooks/use-toast';
 import {
   loadAdminMedications, loadAdminOrders, loadAdminPatients, loadAdminPayments,
@@ -84,34 +85,38 @@ function AdminShell({
   section, onSection, children, onLogout,
 }: { section: Section; onSection: (section: Section) => void; children: React.ReactNode; onLogout: () => void }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { sidebarMode, setSidebarMode } = useSidebarMode();
   return (
     <div className="flex min-h-[100dvh] bg-slate-50 dark:bg-background">
-      <aside className={`${mobileOpen ? 'fixed inset-y-0 left-0 z-50 flex' : 'hidden'} w-72 flex-col border-r border-border bg-card lg:sticky lg:top-0 lg:flex lg:h-screen`}>
-        <div className="flex h-16 items-center justify-between border-b border-border px-6">
-          <Link href="/admin" className="flex items-center gap-2 font-bold text-primary"><ShieldCheck className="h-6 w-6" /> SugboDoc Admin</Link>
+      <aside className={`${mobileOpen ? 'fixed inset-y-0 left-0 z-50 flex' : 'hidden'} shrink-0 flex-col border-r border-border bg-card transition-[width,opacity] duration-200 lg:sticky lg:top-0 lg:flex lg:h-screen ${sidebarMode === 'hidden' ? 'lg:w-0 lg:overflow-hidden lg:border-r-0 lg:opacity-0' : sidebarMode === 'collapsed' ? 'lg:w-[76px]' : 'lg:w-72'}`}>
+        <div className={`flex h-16 items-center border-b border-border ${sidebarMode === 'collapsed' ? 'justify-center px-3' : 'justify-between px-6'}`}>
+          <Link href="/admin" className={`flex items-center gap-2 font-bold text-primary ${sidebarMode === 'collapsed' ? 'justify-center' : ''}`} title={sidebarMode === 'collapsed' ? 'SugboDoc Admin' : undefined}><ShieldCheck className="h-6 w-6 shrink-0" />{sidebarMode !== 'collapsed' && <span>SugboDoc Admin</span>}</Link>
+          {sidebarMode !== 'collapsed' && <button type="button" onClick={() => setSidebarMode('collapsed')} className="hidden h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex" aria-label="Collapse sidebar to icons" title="Collapse sidebar to icons"><PanelLeftClose className="h-5 w-5" /></button>}
           <button className="lg:hidden" onClick={() => setMobileOpen(false)}><X className="h-5 w-5" /></button>
         </div>
-        <div className="border-b border-border bg-primary/5 px-5 py-4">
+        <div className={`border-b border-border bg-primary/5 px-5 py-4 ${sidebarMode === 'collapsed' ? 'hidden' : ''}`}>
           <p className="text-xs font-bold uppercase tracking-wider text-primary">Administrator workspace</p>
           <p className="mt-1 text-xs text-muted-foreground">Shared PostgreSQL operations</p>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        {sidebarMode === 'collapsed' && <div className="flex justify-center border-b border-border py-2"><button type="button" onClick={() => setSidebarMode('expanded')} className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Expand sidebar" title="Expand sidebar"><PanelLeftOpen className="h-5 w-5" /></button></div>}
+        <nav className={`flex-1 space-y-1 overflow-y-auto p-3 ${sidebarMode === 'collapsed' ? 'px-2' : ''}`}>
           {sectionItems.map(item => (
-            <button key={item.id} onClick={() => { onSection(item.id); setMobileOpen(false); }} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${section === item.id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-              <item.icon className="h-4 w-4" /> {item.label}
+            <button key={item.id} title={sidebarMode === 'collapsed' ? item.label : undefined} aria-label={sidebarMode === 'collapsed' ? item.label : undefined} onClick={() => { onSection(item.id); setMobileOpen(false); }} className={`flex w-full rounded-xl py-2.5 text-left text-sm font-semibold transition ${sidebarMode === 'collapsed' ? 'justify-center px-3' : 'items-center gap-3 px-3'} ${section === item.id ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              <item.icon className="h-4 w-4 shrink-0" /> {sidebarMode !== 'collapsed' && item.label}
             </button>
           ))}
         </nav>
-        <div className="border-t border-border p-3">
-          <Link href="/" className="mb-1 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-muted-foreground hover:bg-muted"><ArrowLeft className="h-4 w-4" /> Patient portal</Link>
-          <button onClick={onLogout} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-destructive"><LogOut className="h-4 w-4" /> Sign out</button>
+        <div className={`border-t border-border p-3 ${sidebarMode === 'collapsed' ? 'space-y-2' : ''}`}>
+          {sidebarMode === 'collapsed' && <button type="button" onClick={() => setSidebarMode('hidden')} className="flex w-full items-center justify-center rounded-xl px-3 py-2.5 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Hide sidebar" title="Hide sidebar"><EyeOff className="h-4 w-4" /></button>}
+          <Link href="/" title={sidebarMode === 'collapsed' ? 'Patient portal' : undefined} aria-label={sidebarMode === 'collapsed' ? 'Patient portal' : undefined} className={`mb-1 flex rounded-xl py-2.5 text-sm font-semibold text-muted-foreground hover:bg-muted ${sidebarMode === 'collapsed' ? 'justify-center px-3' : 'items-center gap-3 px-3'}`}><ArrowLeft className="h-4 w-4 shrink-0" />{sidebarMode !== 'collapsed' && 'Patient portal'}</Link>
+          <button onClick={onLogout} title={sidebarMode === 'collapsed' ? 'Sign out' : undefined} aria-label="Sign out" className={`flex w-full rounded-xl py-2.5 text-left text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-destructive ${sidebarMode === 'collapsed' ? 'justify-center px-3' : 'items-center gap-3 px-3'}`}><LogOut className="h-4 w-4 shrink-0" />{sidebarMode !== 'collapsed' && 'Sign out'}</button>
         </div>
       </aside>
       {mobileOpen && <button aria-label="Close admin navigation" className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setMobileOpen(false)} />}
       <main className="min-w-0 flex-1">
         <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-card/90 px-4 backdrop-blur lg:px-8">
           <button className="rounded-lg p-2 hover:bg-muted lg:hidden" onClick={() => setMobileOpen(true)}><Menu className="h-5 w-5" /></button>
-          <div className="hidden lg:block"><p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">SugboDoc</p><p className="font-semibold">Admin Portal</p></div>
+          <div className="flex min-w-0 items-center gap-3"><button type="button" onClick={() => setSidebarMode('collapsed')} className={`hidden h-9 w-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground lg:flex ${sidebarMode === 'hidden' ? '' : 'invisible'}`} aria-label="Show sidebar" title="Show sidebar"><PanelLeftOpen className="h-5 w-5" /></button><div className="hidden lg:block"><p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">SugboDoc</p><p className="font-semibold">Admin Portal</p></div></div>
           <div className="ml-auto flex items-center gap-3"><span className="hidden text-sm text-muted-foreground sm:inline">Admin mode</span><div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">SA</div></div>
         </header>
         <div className="mx-auto max-w-[1500px] p-4 pb-12 lg:p-8">{children}</div>
