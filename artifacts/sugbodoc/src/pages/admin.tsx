@@ -474,7 +474,6 @@ function AdminMessages() {
     }
   };
   return <div className="space-y-5">
-    <PageHeading eyebrow="Care communication" title="Patient messages" description="Communicate with patients through conversations stored in the shared PostgreSQL database." />
     {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
     <div className={`${cardClass} flex min-h-[620px] overflow-hidden`}>
       <aside className="w-80 shrink-0 border-r border-border bg-card">
