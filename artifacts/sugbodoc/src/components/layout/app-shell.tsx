@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Home, Calendar, FileText, MessageSquare, CreditCard, User, Bell, Pill, ShieldCheck, LogOut } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Home, Calendar, FileText, MessageSquare, CreditCard, User, Bell, Pill, ShieldCheck, LogOut, PanelLeftClose, PanelLeftOpen, EyeOff } from 'lucide-react';
 import Logo from '@/components/brand/logo';
 import { useAuth } from '@/hooks/use-auth';
 
@@ -9,9 +10,25 @@ type ShellProps = {
   title: string;
 };
 
+type SidebarMode = 'expanded' | 'collapsed' | 'hidden';
+
+const SIDEBAR_MODE_KEY = 'sugbodoc_patient_sidebar_mode';
+
 export default function AppShell({ children, title }: ShellProps) {
   const [location, setLocation] = useLocation();
   const { logout } = useAuth();
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('expanded');
+
+  useEffect(() => {
+    const savedMode = window.localStorage.getItem(SIDEBAR_MODE_KEY);
+    if (savedMode === 'expanded' || savedMode === 'collapsed' || savedMode === 'hidden') {
+      setSidebarMode(savedMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_MODE_KEY, sidebarMode);
+  }, [sidebarMode]);
 
   const navItems = [
     { icon: Home, label: 'Home', path: '/' },
@@ -28,38 +45,87 @@ export default function AppShell({ children, title }: ShellProps) {
     <div className="flex h-[100dvh] w-full bg-slate-50 dark:bg-background overflow-hidden">
       
       {/* Desktop Sidebar (lg and up) */}
-      <aside className="hidden lg:flex w-64 flex-col border-r border-border bg-card">
-        <div className="h-16 flex items-center px-6 border-b border-border">
-          <Logo />
+      <aside
+        className={`hidden shrink-0 flex-col border-r border-border bg-card transition-[width,opacity] duration-200 lg:flex ${
+          sidebarMode === 'hidden' ? 'w-0 overflow-hidden border-r-0 opacity-0' : sidebarMode === 'collapsed' ? 'w-[76px]' : 'w-64'
+        }`}
+        aria-hidden={sidebarMode === 'hidden'}
+      >
+        <div className={`flex h-16 items-center border-b border-border ${sidebarMode === 'collapsed' ? 'justify-center px-3' : 'justify-between px-5'}`}>
+          <Logo compact={sidebarMode === 'collapsed'} />
+          {sidebarMode !== 'collapsed' && (
+            <button
+              type="button"
+              onClick={() => setSidebarMode('collapsed')}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Collapse sidebar to icons"
+              title="Collapse sidebar to icons"
+            >
+              <PanelLeftClose className="h-5 w-5" />
+            </button>
+          )}
         </div>
         
-        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+        {sidebarMode === 'collapsed' && (
+          <div className="flex justify-center border-b border-border py-2">
+            <button
+              type="button"
+              onClick={() => setSidebarMode('expanded')}
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+            >
+              <PanelLeftOpen className="h-5 w-5" />
+            </button>
+          </div>
+        )}
+
+        <nav className={`flex-1 overflow-y-auto py-4 ${sidebarMode === 'collapsed' ? 'px-2' : 'px-3'} space-y-1`}>
           {navItems.map((item) => {
             const isActive = location === item.path || (item.path !== '/' && location.startsWith(item.path));
             return (
               <Link 
                 key={item.path} 
                 href={item.path}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                title={sidebarMode === 'collapsed' ? item.label : undefined}
+                aria-label={sidebarMode === 'collapsed' ? item.label : undefined}
+                className={`flex items-center rounded-lg text-sm font-medium transition-colors ${
+                  sidebarMode === 'collapsed' ? 'justify-center px-3 py-3' : 'gap-3 px-3 py-2.5'
+                } ${
                   isActive 
                     ? 'bg-primary text-primary-foreground shadow-sm' 
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                 }`}
               >
                 <item.icon className="h-5 w-5 shrink-0" />
-                {item.label}
+                {sidebarMode !== 'collapsed' && <span>{item.label}</span>}
               </Link>
             );
           })}
         </nav>
-        <div className="shrink-0 border-t border-border p-3">
+        <div className={`shrink-0 border-t border-border p-3 ${sidebarMode === 'collapsed' ? 'space-y-2' : ''}`}>
+          {sidebarMode === 'collapsed' && (
+            <button
+              type="button"
+              onClick={() => setSidebarMode('hidden')}
+              className="flex w-full items-center justify-center rounded-lg px-3 py-2.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Hide sidebar"
+              title="Hide sidebar"
+            >
+              <EyeOff className="h-5 w-5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => { logout(); setLocation('/login'); }}
-            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+            className={`flex w-full items-center rounded-lg text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-destructive ${
+              sidebarMode === 'collapsed' ? 'justify-center px-3 py-2.5' : 'gap-3 px-3 py-2.5'
+            }`}
+            aria-label="Sign out"
+            title={sidebarMode === 'collapsed' ? 'Sign out' : undefined}
           >
             <LogOut className="h-5 w-5 shrink-0" />
-            Sign out
+            {sidebarMode !== 'collapsed' && <span>Sign out</span>}
           </button>
         </div>
       </aside>
@@ -69,16 +135,29 @@ export default function AppShell({ children, title }: ShellProps) {
         
         {/* Top Header */}
         <header className="h-16 flex items-center justify-between px-4 lg:px-8 border-b border-border bg-card/50 backdrop-blur-sm z-10 shrink-0 sticky top-0">
-          <h1 className="text-lg font-semibold truncate text-foreground">{title}</h1>
-          <button className="h-10 w-10 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors relative">
+          <div className="flex min-w-0 items-center gap-3">
+            {sidebarMode === 'hidden' && (
+              <button
+                type="button"
+                onClick={() => setSidebarMode('collapsed')}
+                className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex"
+                aria-label="Show sidebar"
+                title="Show sidebar"
+              >
+                <PanelLeftOpen className="h-5 w-5" />
+              </button>
+            )}
+            <h1 className="truncate text-lg font-semibold text-foreground">{title}</h1>
+          </div>
+          <button aria-label="Notifications" className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted">
             <Bell className="h-5 w-5" />
-            <span className="absolute top-2 right-2 h-2.5 w-2.5 rounded-full bg-destructive border-2 border-card" />
+            <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full border-2 border-card bg-destructive" />
           </button>
         </header>
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 lg:p-8 pb-24 lg:pb-8">
-          <div className="mx-auto max-w-5xl">
+          <div className="w-full max-w-[1440px]">
             {children}
           </div>
         </div>
