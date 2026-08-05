@@ -2,7 +2,7 @@ import { Router } from "express";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db, usersTable } from "@workspace/db";
-import { createSession, ensureDemoAdmin, getUserFromRequest, loginUser, registerUser } from "../lib/sugbodoc-auth";
+import { createSession, ensureDemoAdmin, ensureDemoDoctor, getUserFromRequest, loginUser, registerUser } from "../lib/sugbodoc-auth";
 
 const router = Router();
 
@@ -46,6 +46,7 @@ router.post("/accounts/login", async (req, res) => {
   }
   try {
     await ensureDemoAdmin();
+    await ensureDemoDoctor();
     const user = await loginUser(parsed.data.email, parsed.data.password);
     if (!user) {
       res.status(401).json({ error: "Invalid email or password." });

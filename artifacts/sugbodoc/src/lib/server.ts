@@ -213,6 +213,76 @@ export function serverMarkMessagesRead(conversationId: string) {
   });
 }
 
+export type DoctorAppointment = ServerAppointment & {
+  reason?: string;
+  visitType?: string;
+  smsStatus?: string;
+};
+
+export type DoctorPatient = {
+  id: string;
+  name: string;
+  initials: string;
+  email: string;
+  phone: string;
+  birthday: string;
+  gender: string;
+  bloodType: string;
+  allergies: string[];
+  emergencyContact?: { name: string; number: string } | null;
+  insurance: Record<string, unknown> | null;
+  appointments: DoctorAppointment[];
+  encounters: Encounter[];
+};
+
+export type DoctorDashboard = {
+  doctor: {
+    id: string;
+    providerId: string | null;
+    name: string;
+    initials: string;
+    specialty: string;
+    clinic: string;
+  };
+  appointments: DoctorAppointment[];
+  patients: DoctorPatient[];
+  stats: {
+    todayAppointments: number;
+    pendingSoapNotes: number;
+    followUps: number;
+    unreadMessages: number;
+  };
+};
+
+export function serverDoctorDashboard() {
+  return request<DoctorDashboard>('/doctor/dashboard');
+}
+
+export function serverDoctorPatient(patientId: string) {
+  return request<{ patient: DoctorPatient }>(`/doctor/patients/${encodeURIComponent(patientId)}`);
+}
+
+export function serverDoctorUpdateAppointmentStatus(id: string, status: 'In Progress' | 'Completed' | 'No Show' | 'Cancelled') {
+  return request<{ appointment: DoctorAppointment; encounter: Encounter | null }>(`/doctor/appointments/${encodeURIComponent(id)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export function serverDoctorUpdateEncounter(encounterId: string, encounter: Encounter) {
+  return request<{ encounter: Encounter }>(`/doctor/encounters/${encodeURIComponent(encounterId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(encounter),
+  });
+}
+
+export function serverDoctorCreateFollowUp(patientId: string, input: { date: string; time: string; reason: string }) {
+  return request<{ appointment: DoctorAppointment }>(`/doctor/patients/${encodeURIComponent(patientId)}/follow-ups`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function serverMigrateRecords(patientId: string, encounters: Encounter[]) {
   return request<{ patientId: string; encounters: Encounter[] }>('/records/migrate', {
     method: 'POST',

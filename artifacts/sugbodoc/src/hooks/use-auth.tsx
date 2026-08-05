@@ -9,7 +9,7 @@ export const STORAGE_KEYS = {
   APPOINTMENTS: 'sugbodoc_appointments',
 } as const;
 
-export type UserRole = 'Patient' | 'Admin' | 'Clinician';
+export type UserRole = 'Patient' | 'Admin' | 'Clinician' | 'Doctor';
 
 export type SessionUser = {
   id?: string;

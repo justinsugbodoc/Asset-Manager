@@ -5,3 +5,4 @@
 - [Shared billing payments](shared-billing-payments.md) — Stripe success must finalize bills and payments through the authenticated database flow before either portal updates its UI.
 - [Shared clinical records](shared-clinical-records.md) — database encounters are the source of truth; legacy migration is restricted to the matching demo patient.
 - [Shared patient-admin messaging](shared-patient-admin-messaging.md) — one PostgreSQL conversation per patient, with authenticated role-based access and polling refresh.
+- [Doctor portal access](doctor-portal-access.md) — Doctors are provider-assignment scoped and can edit shared clinical encounters, not administrative or financial records.

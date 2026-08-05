@@ -15,20 +15,24 @@ import Profile from '@/pages/profile';
 import InsuranceClaims from '@/pages/insurance-claims';
 import NotFound from '@/pages/not-found';
 import Admin from '@/pages/admin';
+import Doctor from '@/pages/doctor';
 
 function ProtectedRoute({ component: Component, ...rest }: any) {
   const { token } = useAuth();
   const [, setLocation] = useLocation();
   const user = getCurrentSessionUser();
   const isStaff = user?.role === 'Admin' || user?.role === 'Clinician';
+  const isDoctor = user?.role === 'Doctor';
 
   useEffect(() => {
     if (!token) {
       setLocation('/login');
     } else if (isStaff) {
       setLocation('/admin');
+    } else if (isDoctor) {
+      setLocation('/doctor');
     }
-  }, [token, isStaff, setLocation]);
+  }, [token, isStaff, isDoctor, setLocation]);
 
   if (!token) {
     return (
@@ -41,18 +45,32 @@ function ProtectedRoute({ component: Component, ...rest }: any) {
     );
   }
 
-  if (isStaff) {
+  if (isStaff || isDoctor) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <div className="text-center">
           <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
-          <p className="mt-3 text-sm text-muted-foreground">Opening the admin portal…</p>
+          <p className="mt-3 text-sm text-muted-foreground">Opening your clinical workspace…</p>
         </div>
       </div>
     );
   }
 
   return <Component {...rest} />;
+}
+
+function DoctorRoute() {
+  const { token } = useAuth();
+  const [, setLocation] = useLocation();
+  const user = getCurrentSessionUser();
+
+  useEffect(() => {
+    if (!token) setLocation('/login');
+    else if (user?.role !== 'Doctor') setLocation(user?.role === 'Admin' || user?.role === 'Clinician' ? '/admin' : '/');
+  }, [token, user?.role, setLocation]);
+
+  if (!token || user?.role !== 'Doctor') return null;
+  return <Doctor />;
 }
 
 function AdminRoute() {
@@ -111,6 +129,9 @@ export function AppRoutes() {
       </Route>
       <Route path="/admin">
         {() => <AdminRoute />}
+      </Route>
+      <Route path="/doctor">
+        {() => <DoctorRoute />}
       </Route>
       <Route component={NotFound} />
     </Switch>

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback } from "node:crypto";
 import { promisify } from "node:util";
 import { and, eq, gt } from "drizzle-orm";
-import { db, sessionsTable, usersTable, type PublicUser, type User } from "@workspace/db";
+import { appointmentsTable, db, sessionsTable, usersTable, type PublicUser, type User } from "@workspace/db";
 import type { Request } from "express";
 
 const scrypt = promisify(scryptCallback);
@@ -11,6 +11,10 @@ export type AuthUser = Omit<PublicUser, "clinicalEditingPermission" | "insurance
   clinicalEditingPermission: boolean;
   insurance: Record<string, unknown> | null;
   claims: Record<string, unknown>[];
+  providerId: string | null;
+  specialty: string;
+  clinic: string;
+  allergies: string[];
 };
 
 function toPublicUser(user: User): AuthUser {
@@ -25,6 +29,10 @@ function toPublicUser(user: User): AuthUser {
     bloodType: user.bloodType,
     emergencyContact: user.emergencyContact,
     role: user.role as AuthUser["role"],
+    providerId: user.providerId,
+    specialty: user.specialty,
+    clinic: user.clinic,
+    allergies: user.allergies ?? [],
     status: user.status as AuthUser["status"],
     clinicalEditingPermission: user.clinicalEditingPermission === "true",
     insurance: user.insuranceData,
@@ -147,6 +155,33 @@ export async function ensureDemoAdmin() {
   return user;
 }
 
+export async function ensureDemoDoctor() {
+  const email = "doctor@sugbodoc.test";
+  const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+  if (existing[0]) return existing[0];
+  const [user] = await db.insert(usersTable).values({
+    id: "doctor_dr_2",
+    name: "Dr. Jose Reyes",
+    initials: "JR",
+    email,
+    passwordHash: await hashPassword("doctor123"),
+    phone: "+63 917 000 0002",
+    birthday: "1982-06-18",
+    gender: "Male",
+    bloodType: "",
+    role: "Doctor",
+    providerId: "dr_2",
+    specialty: "Cardiology",
+    clinic: "Chong Hua Hospital",
+    allergies: [],
+    status: "Active",
+    clinicalEditingPermission: "true",
+    insuranceData: null,
+    claimsData: [],
+  }).returning();
+  return user;
+}
+
 export async function ensureDemoPatient() {
   const email = "juan@example.com";
   const existing = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
@@ -170,4 +205,19 @@ export async function ensureDemoPatient() {
 
 export function isAdminUser(user: AuthUser | null) {
   return user?.role === "Admin" || user?.role === "Clinician";
+}
+
+export function isDoctorUser(user: AuthUser | null) {
+  return user?.role === "Doctor" && Boolean(user.providerId);
+}
+
+export async function doctorCanAccessPatient(user: AuthUser | null, patientId: string) {
+  if (!user || user.role !== "Doctor" || !user.providerId) return false;
+  const providerId = user.providerId;
+  const appointments = await db.select({ data: appointmentsTable.data }).from(appointmentsTable)
+    .where(eq(appointmentsTable.userId, patientId));
+  return appointments.some(appointment => {
+    const doctor = (appointment.data as Record<string, any>).doctor;
+    return doctor?.id === providerId;
+  });
 }

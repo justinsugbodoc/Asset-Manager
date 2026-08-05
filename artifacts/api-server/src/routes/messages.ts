@@ -7,7 +7,7 @@ import {
   messagesTable,
   usersTable,
 } from "@workspace/db";
-import { getUserFromRequest, isAdminUser, type AuthUser } from "../lib/sugbodoc-auth";
+import { doctorCanAccessPatient, getUserFromRequest, isAdminUser, isDoctorUser, type AuthUser } from "../lib/sugbodoc-auth";
 import { z } from "zod";
 
 const router = Router();
@@ -42,7 +42,7 @@ async function canAccessConversation(user: AuthUser, conversationId: string) {
     .limit(1);
   const conversation = rows[0];
   if (!conversation) return null;
-  if (!isAdminUser(user) && conversation.patientId !== user.id) return null;
+  if (!isAdminUser(user) && conversation.patientId !== user.id && !(isDoctorUser(user) && await doctorCanAccessPatient(user, conversation.patientId))) return null;
   return conversation;
 }
 
@@ -73,11 +73,14 @@ router.get("/messages", async (req, res): Promise<void> => {
   const user = await requireUser(req, res);
   if (!user) return;
 
+  const allPatients = await db.select({ id: usersTable.id, name: usersTable.name, initials: usersTable.initials, email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.role, "Patient"));
   const patients = isAdminUser(user)
-    ? await db.select({ id: usersTable.id, name: usersTable.name, initials: usersTable.initials, email: usersTable.email })
-      .from(usersTable)
-      .where(eq(usersTable.role, "Patient"))
-    : [{ id: user.id, name: user.name, initials: user.initials, email: user.email }];
+    ? allPatients
+    : isDoctorUser(user)
+      ? (await Promise.all(allPatients.map(async patient => (await doctorCanAccessPatient(user, patient.id)) ? patient : null))).filter(Boolean) as typeof allPatients
+      : [{ id: user.id, name: user.name, initials: user.initials, email: user.email }];
 
   const conversations = [];
   for (const patient of patients) {

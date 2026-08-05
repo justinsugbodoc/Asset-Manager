@@ -23,7 +23,7 @@ const recordTypes = [
 ] as const;
 type RecordType = (typeof recordTypes)[number];
 
-const encounterSchema = z.object({
+export const encounterSchema = z.object({
   id: z.string().min(1),
   encounterReference: z.string().min(1),
   appointmentId: z.string().nullable().optional(),
@@ -64,7 +64,7 @@ function recordId(encounterId: string, type: string, value: unknown, index: numb
   return `cr_${encounterId}_${type}_${id}`.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-async function upsertEncounter(patientId: string, raw: unknown) {
+export async function upsertEncounter(patientId: string, raw: unknown) {
   const parsed = encounterSchema.safeParse(raw);
   if (!parsed.success || parsed.data.patientId !== patientId) return null;
   const encounter = parsed.data;
@@ -121,6 +121,7 @@ async function upsertEncounter(patientId: string, raw: unknown) {
         id,
         patientId,
         encounterId: encounter.id,
+        appointmentId: appointment[0]?.id ?? null,
         recordType: type,
         data: (data && typeof data === "object" ? data : { value: data }) as Record<string, unknown>,
       }).onConflictDoUpdate({

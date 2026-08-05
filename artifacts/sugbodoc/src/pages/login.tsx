@@ -23,7 +23,7 @@ export default function Login() {
       const result = await serverLogin(email, password);
       sessionStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(result.user));
       login(result.token);
-      setLocation(result.user.role === 'Admin' || result.user.role === 'Clinician' ? '/admin' : '/');
+       setLocation(result.user.role === 'Admin' || result.user.role === 'Clinician' ? '/admin' : result.user.role === 'Doctor' ? '/doctor' : '/');
       return;
     } catch (error) {
       setLoading(false);
@@ -107,8 +107,9 @@ export default function Login() {
             </Link>
           </p>
         </div>
-        <div className="mt-5 rounded-xl border border-primary/15 bg-primary/5 p-3 text-center text-xs text-muted-foreground">
-          Admin demo: <span className="font-semibold text-foreground">admin@sugbodoc.test</span> · password <span className="font-semibold text-foreground">admin123</span>
+         <div className="mt-5 space-y-2 rounded-xl border border-primary/15 bg-primary/5 p-3 text-center text-xs text-muted-foreground">
+           <p>Admin demo: <span className="font-semibold text-foreground">admin@sugbodoc.test</span> · password <span className="font-semibold text-foreground">admin123</span></p>
+           <p>Doctor demo: <span className="font-semibold text-foreground">doctor@sugbodoc.test</span> · password <span className="font-semibold text-foreground">doctor123</span></p>
         </div>
       </div>
     </div>
