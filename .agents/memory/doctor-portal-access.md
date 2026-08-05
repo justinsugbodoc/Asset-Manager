@@ -7,4 +7,4 @@ Doctors are a distinct role from Admin and Clinician. Their workspace is limited
 
 **Why:** Clinical edits must synchronize across Patient and Admin views without granting Doctors administrative or financial-management access.
 
-**How to apply:** Keep Doctor endpoints and routes provider-assignment scoped, log record access and clinical changes, and preserve database encounters as the shared source of truth.
+**How to apply:** Keep Doctor endpoints and routes provider-assignment scoped, log record access and clinical changes, and preserve database encounters as the shared source of truth. Starting an appointment creates or reuses its linked encounter; saving records keeps that appointment link and synchronizes appointment metadata without regressing terminal statuses.

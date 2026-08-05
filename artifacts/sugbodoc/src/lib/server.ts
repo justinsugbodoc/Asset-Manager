@@ -270,7 +270,7 @@ export function serverDoctorUpdateAppointmentStatus(id: string, status: 'In Prog
 }
 
 export function serverDoctorUpdateEncounter(encounterId: string, encounter: Encounter) {
-  return request<{ encounter: Encounter }>(`/doctor/encounters/${encodeURIComponent(encounterId)}`, {
+  return request<{ encounter: Encounter; appointment: DoctorAppointment | null }>(`/doctor/encounters/${encodeURIComponent(encounterId)}`, {
     method: 'PUT',
     body: JSON.stringify(encounter),
   });

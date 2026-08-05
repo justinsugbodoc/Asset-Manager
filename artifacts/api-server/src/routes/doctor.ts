@@ -54,6 +54,81 @@ async function recordAudit(actor: string, action: string, target: string) {
   await db.insert(auditEventsTable).values({ id: `audit_${randomUUID()}`, actor, action, target });
 }
 
+async function ensureAppointmentEncounter(
+  appointment: typeof appointmentsTable.$inferSelect,
+  patient: typeof usersTable.$inferSelect,
+  doctor: Awaited<ReturnType<typeof getUserFromRequest>> & { providerId?: string | null },
+  status: string,
+) {
+  const existing = await db.select().from(encountersTable)
+    .where(and(eq(encountersTable.appointmentId, appointment.id), eq(encountersTable.patientId, patient.id)))
+    .limit(1);
+  const appointmentDetails = {
+    ...((existing[0]?.data as Record<string, unknown> | undefined)?.appointmentDetails as Record<string, unknown> | undefined),
+    date: appointment.date,
+    time: appointment.time,
+    status,
+    reference: appointment.reference,
+  };
+
+  if (existing[0]) {
+    await db.update(encountersTable).set({
+      data: {
+        ...(existing[0].data as Record<string, unknown>),
+        patientName: patient.name,
+        date: appointment.date,
+        doctorId: doctor.providerId,
+        doctor: doctor.name,
+        specialty: doctor.specialty,
+        clinic: doctor.clinic,
+        appointmentDetails,
+      },
+      updatedAt: new Date(),
+    }).where(eq(encountersTable.id, existing[0].id));
+    return (await loadPatientEncounters(patient.id)).find(item => item.id === existing[0].id) ?? null;
+  }
+
+  const id = `enc_${appointment.id}`;
+  const created = await upsertEncounter(patient.id, {
+    id,
+    encounterReference: `ENC-${appointment.reference}`,
+    appointmentId: appointment.id,
+    patientId: patient.id,
+    patientName: patient.name,
+    encounterDate: new Date().toISOString(),
+    date: appointment.date,
+    doctorId: doctor.providerId,
+    doctor: doctor.name,
+    specialty: doctor.specialty,
+    clinic: doctor.clinic,
+    chiefComplaint: (appointment.data as Record<string, any>).reason ?? "Consultation",
+    appointmentDetails,
+    clinicalSummary: "",
+    billing: {
+      consultationFee: Number((appointment.data as Record<string, any>).billing?.originalAmount ?? 0),
+      laboratoryCharges: 0,
+      imagingCharges: 0,
+      pharmacyCharges: 0,
+      insuranceCoverage: Number((appointment.data as Record<string, any>).billing?.estimatedInsuranceCoverage ?? 0),
+      payments: [],
+      relatedBillIds: [],
+    },
+    soapNotes: [],
+    diagnoses: [],
+    prescriptions: [],
+    medications: [],
+    pharmacyOrders: [],
+    vitals: [],
+    laboratoryResults: [],
+    imaging: [],
+    bills: [],
+    payments: [],
+    insurance: patient.insuranceData,
+    claims: patient.claimsData ?? [],
+  });
+  return created ? (await loadPatientEncounters(patient.id)).find(item => item.id === id) ?? null : null;
+}
+
 async function patientSummary(patientId: string, doctorId: string) {
   const patient = await db.select().from(usersTable).where(and(eq(usersTable.id, patientId), eq(usersTable.role, "Patient"))).limit(1);
   if (!patient[0] || !(await doctorCanAccessPatient({ role: "Doctor", providerId: doctorId } as any, patientId))) return null;
@@ -149,33 +224,8 @@ router.patch("/doctor/appointments/:id/status", async (req, res): Promise<void> 
     data: { ...(existing[0].data as Record<string, unknown>), smsStatus: "mock-pending", doctorUpdatedAt: new Date().toISOString() },
   }).where(eq(appointmentsTable.id, existing[0].id)).returning();
   let encounter = null;
-  if (parsed.data.status === "Completed") {
-    const existingEncounter = await db.select().from(encountersTable).where(eq(encountersTable.appointmentId, updated.id)).limit(1);
-    if (existingEncounter[0]) {
-      encounter = (await loadPatientEncounters(patient.id)).find(item => item.id === existingEncounter[0].id) ?? null;
-    } else {
-      const id = `enc_${updated.id}`;
-      const date = new Date().toISOString();
-      const created = await upsertEncounter(patient.id, {
-        id,
-        encounterReference: `ENC-${updated.reference}`,
-        appointmentId: updated.id,
-        patientId: patient.id,
-        patientName: patient.name,
-        encounterDate: date,
-        date: updated.date,
-        doctorId: doctor.providerId,
-        doctor: doctor.name,
-        specialty: doctor.specialty,
-        clinic: doctor.clinic,
-        chiefComplaint: (updated.data as any).reason ?? "Completed consultation",
-        appointmentDetails: { date: updated.date, time: updated.time, status: "Completed", reference: updated.reference },
-        clinicalSummary: "",
-        billing: { consultationFee: Number((updated.data as any).billing?.originalAmount ?? 0), laboratoryCharges: 0, imagingCharges: 0, pharmacyCharges: 0, insuranceCoverage: Number((updated.data as any).billing?.estimatedInsuranceCoverage ?? 0), payments: [], relatedBillIds: [] },
-        soapNotes: [], diagnoses: [], prescriptions: [], medications: [], pharmacyOrders: [], vitals: [], laboratoryResults: [], imaging: [], bills: [], payments: [], insurance: patient.insuranceData, claims: patient.claimsData ?? [],
-      });
-      encounter = created ? (await loadPatientEncounters(patient.id)).find(item => item.id === id) ?? null : null;
-    }
+  if (parsed.data.status === "In Progress" || parsed.data.status === "Completed") {
+    encounter = await ensureAppointmentEncounter(updated, patient, doctor, parsed.data.status);
   }
   await recordAudit(doctor.name, `Marked appointment ${parsed.data.status.toLowerCase()}`, updated.reference);
   res.json({ appointment: toAppointment(updated), encounter });
@@ -198,11 +248,37 @@ router.put("/doctor/encounters/:encounterId", async (req, res): Promise<void> =>
     res.status(404).json({ error: "Encounter not found." });
     return;
   }
+  const appointmentId = parsed.data.appointmentId || existing[0].appointmentId;
+  const appointment = appointmentId
+    ? await db.select().from(appointmentsTable).where(and(eq(appointmentsTable.id, appointmentId), eq(appointmentsTable.userId, parsed.data.patientId))).limit(1)
+    : [];
+  if (appointmentId && (!appointment[0] || (appointment[0].data as Record<string, any>).doctor?.id !== doctor.providerId)) {
+    res.status(403).json({ error: "You are not authorized to update this appointment." });
+    return;
+  }
+  const savedAppointment = appointment[0];
+  const syncedEncounter = { ...parsed.data, appointmentId: savedAppointment?.id ?? null };
   await db.delete((await import("@workspace/db")).clinicalRecordsTable).where(eq((await import("@workspace/db")).clinicalRecordsTable.encounterId, parsed.data.id));
-  await upsertEncounter(parsed.data.patientId, parsed.data);
+  await upsertEncounter(parsed.data.patientId, syncedEncounter);
+  let updatedAppointment = null;
+  if (savedAppointment) {
+    const nextStatus = ["Completed", "No Show", "Cancelled"].includes(savedAppointment.status)
+      ? savedAppointment.status
+      : "In Progress";
+    const [updated] = await db.update(appointmentsTable).set({
+      status: nextStatus,
+      updatedAt: new Date(),
+      data: {
+        ...(savedAppointment.data as Record<string, unknown>),
+        clinicalEncounterId: parsed.data.id,
+        clinicalRecordsSavedAt: new Date().toISOString(),
+      },
+    }).where(eq(appointmentsTable.id, savedAppointment.id)).returning();
+    updatedAppointment = updated;
+  }
   const encounter = (await loadPatientEncounters(parsed.data.patientId)).find(item => item.id === parsed.data.id);
   await recordAudit(doctor.name, "Updated clinical encounter", parsed.data.encounterReference);
-  res.json({ encounter });
+  res.json({ encounter, appointment: updatedAppointment ? toAppointment(updatedAppointment) : null });
 });
 
 router.post("/doctor/patients/:patientId/follow-ups", async (req, res): Promise<void> => {
