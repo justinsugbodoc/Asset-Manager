@@ -147,6 +147,22 @@ export const auditEventsTable = pgTable("sugbodoc_audit_events", {
   timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const messageConversationsTable = pgTable("sugbodoc_message_conversations", {
+  id: text("id").primaryKey(),
+  patientId: text("patient_id").notNull().unique().references(() => usersTable.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const messagesTable = pgTable("sugbodoc_messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull().references(() => messageConversationsTable.id, { onDelete: "cascade" }),
+  senderId: text("sender_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(usersTable).omit({
   createdAt: true,
   updatedAt: true,
@@ -174,6 +190,8 @@ export type PharmacyBill = typeof pharmacyBillsTable.$inferSelect;
 export type PharmacyPayment = typeof pharmacyPaymentsTable.$inferSelect;
 export type AdminSchedule = typeof adminSchedulesTable.$inferSelect;
 export type AuditEvent = typeof auditEventsTable.$inferSelect;
+export type MessageConversation = typeof messageConversationsTable.$inferSelect;
+export type Message = typeof messagesTable.$inferSelect;
 export type PublicUser = Omit<User, "passwordHash">;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertSession = z.infer<typeof insertSessionSchema>;

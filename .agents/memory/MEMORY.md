@@ -4,3 +4,4 @@
 - [Shared pharmacy commerce](shared-pharmacy-commerce.md) — pharmacy catalog, stock, checkout orders, and fulfillment status are database-backed and shared by Patient/Admin.
 - [Shared billing payments](shared-billing-payments.md) — Stripe success must finalize bills and payments through the authenticated database flow before either portal updates its UI.
 - [Shared clinical records](shared-clinical-records.md) — database encounters are the source of truth; legacy migration is restricted to the matching demo patient.
+- [Shared patient-admin messaging](shared-patient-admin-messaging.md) — one PostgreSQL conversation per patient, with authenticated role-based access and polling refresh.

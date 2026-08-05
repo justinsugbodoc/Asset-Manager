@@ -166,6 +166,53 @@ export function serverRecords(patientId?: string) {
   return request<{ patientId: string; encounters: Encounter[] }>(`/records${query}`);
 }
 
+export type ServerMessage = {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderName: string;
+  senderInitials: string;
+  senderRole: string;
+  body: string;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type ServerMessageConversation = {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientInitials: string;
+  patientEmail: string;
+  updatedAt: string;
+  unreadCount: number;
+  lastMessage: ServerMessage | null;
+};
+
+export function serverMessageConversations() {
+  return request<{ conversations: ServerMessageConversation[] }>('/messages');
+}
+
+export function serverMessages(conversationId: string) {
+  return request<{
+    conversation: Omit<ServerMessageConversation, 'updatedAt' | 'unreadCount' | 'lastMessage'>;
+    messages: ServerMessage[];
+  }>(`/messages/${encodeURIComponent(conversationId)}`);
+}
+
+export function serverSendMessage(conversationId: string, body: string) {
+  return request<{ message: ServerMessage }>(`/messages/${encodeURIComponent(conversationId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export function serverMarkMessagesRead(conversationId: string) {
+  return request<{ success: boolean }>(`/messages/${encodeURIComponent(conversationId)}/read`, {
+    method: 'PATCH',
+  });
+}
+
 export function serverMigrateRecords(patientId: string, encounters: Encounter[]) {
   return request<{ patientId: string; encounters: Encounter[] }>('/records/migrate', {
     method: 'POST',

@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertCircle, ArrowLeft, CalendarDays, Check, ChevronRight, ClipboardList,
   CreditCard, FileCheck2, FileText, Filter, LayoutDashboard, LogOut, Menu, Package,
-  Pencil, Plus, Search, Settings2, ShieldCheck, Stethoscope, Trash2, Truck, Users, X,
+  MessageSquare, Pencil, Plus, Search, Send, Settings2, ShieldCheck, Stethoscope, Trash2, Truck, Users, X,
   Download, Image as ImageIcon, Maximize2, FlaskConical, HeartPulse, UserRound,
 } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
-import { useAuth } from '@/hooks/use-auth';
+import { getCurrentSessionUser, useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import {
   loadAdminMedications, loadAdminOrders, loadAdminPatients, loadAdminPayments,
@@ -31,14 +31,21 @@ import {
   serverUpdatePatient,
   serverUpdatePharmacyMedication,
   serverUpdatePharmacyOrderStatus,
+  serverMarkMessagesRead,
+  serverMessageConversations,
+  serverMessages,
+  serverSendMessage,
+  type ServerMessage,
+  type ServerMessageConversation,
   type ServerPatient,
 } from '@/lib/server';
 
-type Section = 'overview' | 'patients' | 'appointments' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
+type Section = 'overview' | 'patients' | 'appointments' | 'messages' | 'payments' | 'medications' | 'orders' | 'claims' | 'reports' | 'audit';
 const sectionItems: Array<{ id: Section; label: string; icon: any }> = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'patients', label: 'Patients', icon: Users },
   { id: 'appointments', label: 'Appointments', icon: CalendarDays },
+  { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'payments', label: 'Payments & Billing', icon: CreditCard },
   { id: 'medications', label: 'Pharmacy Inventory', icon: Package },
   { id: 'orders', label: 'Pharmacy Orders', icon: Truck },
@@ -407,6 +414,85 @@ function Claims({ patients, onPatients }: { patients: AdminPatient[]; onPatients
   return <div className="space-y-5"><PageHeading eyebrow="Coverage operations" title="Insurance & claims" description="Review mock eligibility, claim amounts, patient balances, and claim statuses." /><div className={`${cardClass} overflow-hidden`}><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground"><tr><th className="px-5 py-4">Claim</th><th className="px-5 py-4">Patient</th><th className="px-5 py-4">Related service</th><th className="px-5 py-4">Coverage</th><th className="px-5 py-4">Patient balance</th><th className="px-5 py-4">Status</th></tr></thead><tbody className="divide-y divide-border">{claims.map(({ patient, ...claim }) => <tr key={claim.id}><td className="px-5 py-4 font-bold">{claim.reference}<br /><span className="text-xs font-normal text-muted-foreground">{claim.provider}</span></td><td className="px-5 py-4 font-semibold">{patient.name}</td><td className="px-5 py-4 text-muted-foreground">{claim.relatedLabel}<br /><span className="text-xs">{claim.relatedType}</span></td><td className="px-5 py-4 font-bold text-emerald-600">{money(claim.estimatedCoverage)}</td><td className="px-5 py-4 font-bold">{money(claim.patientBalance)}</td><td className="px-5 py-4"><select value={claim.status} onChange={event => update(claim.id, patient.id, event.target.value as typeof statuses[number])} className="rounded-lg border border-border bg-background px-2 py-1 text-xs"><option>{statuses[0]}</option><option>{statuses[1]}</option><option>{statuses[2]}</option><option>{statuses[3]}</option><option>{statuses[4]}</option></select></td></tr>)}</tbody></table>{!claims.length && <EmptyState text="No insurance claims are available." />}</div></div></div>;
 }
 
+function AdminMessages() {
+  const currentUser = getCurrentSessionUser();
+  const [threads, setThreads] = useState<ServerMessageConversation[]>([]);
+  const [activeId, setActiveId] = useState('');
+  const [messages, setMessages] = useState<ServerMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
+
+  const refreshThreads = async () => {
+    try {
+      const response = await serverMessageConversations();
+      setThreads(response.conversations);
+      setActiveId(current => current || response.conversations[0]?.id || '');
+      setError('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load patient messages.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  const refreshMessages = async (conversationId: string) => {
+    if (!conversationId) return;
+    try {
+      const response = await serverMessages(conversationId);
+      setMessages(response.messages);
+      await serverMarkMessagesRead(conversationId);
+      setThreads(current => current.map(thread => thread.id === conversationId ? { ...thread, unreadCount: 0, lastMessage: response.messages.at(-1) ?? null } : thread));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to load this conversation.');
+    }
+  };
+  useEffect(() => {
+    void refreshThreads();
+    const timer = window.setInterval(() => void refreshThreads(), 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    void refreshMessages(activeId);
+    const timer = window.setInterval(() => void refreshMessages(activeId), 5000);
+    return () => window.clearInterval(timer);
+  }, [activeId]);
+  const activeThread = threads.find(thread => thread.id === activeId);
+  const send = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!input.trim() || !activeId || sending) return;
+    setSending(true);
+    try {
+      const response = await serverSendMessage(activeId, input.trim());
+      setMessages(current => [...current, response.message]);
+      setInput('');
+      await refreshThreads();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to send message.');
+    } finally {
+      setSending(false);
+    }
+  };
+  return <div className="space-y-5">
+    <PageHeading eyebrow="Care communication" title="Patient messages" description="Communicate with patients through conversations stored in the shared PostgreSQL database." />
+    {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+    <div className={`${cardClass} flex min-h-[620px] overflow-hidden`}>
+      <aside className="w-80 shrink-0 border-r border-border bg-card">
+        <div className="border-b border-border bg-muted/30 p-4"><p className="text-xs font-bold uppercase tracking-widest text-primary">Patient inbox</p><p className="mt-1 text-xs text-muted-foreground">Unread messages refresh automatically.</p></div>
+        <div className="divide-y divide-border">
+          {loading ? <div className="space-y-3 p-4">{[1, 2, 3].map(item => <div key={item} className="h-16 animate-pulse rounded-xl bg-muted" />)}</div> : threads.map(thread => <button key={thread.id} onClick={() => setActiveId(thread.id)} className={`flex w-full gap-3 border-l-2 p-4 text-left hover:bg-muted/50 ${activeId === thread.id ? 'border-primary bg-primary/5' : 'border-transparent'}`}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{thread.patientInitials}</span><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="truncate text-sm font-bold">{thread.patientName}</span>{thread.unreadCount > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">{thread.unreadCount}</span>}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{thread.lastMessage?.body ?? 'No messages yet'}</span></span></button>)}</div>
+      </aside>
+      <section className="flex min-w-0 flex-1 flex-col bg-slate-50/50 dark:bg-background">
+        {activeThread ? <>
+          <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-5"><span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">{activeThread.patientInitials}</span><div><h2 className="text-sm font-bold">{activeThread.patientName}</h2><p className="text-xs text-muted-foreground">{activeThread.patientEmail}</p></div></header>
+          <div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.length ? messages.map(message => { const mine = message.senderId === currentUser?.id; return <div key={message.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}><div className={`max-w-[70%] rounded-2xl px-4 py-3 text-sm ${mine ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'rounded-tl-sm border border-border bg-card'}`}><p className="whitespace-pre-wrap">{message.body}</p><p className={`mt-2 text-[10px] ${mine ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{new Date(message.createdAt).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</p></div></div>; }) : <div className="flex h-full flex-col items-center justify-center text-muted-foreground"><MessageSquare className="mb-3 h-12 w-12 opacity-30" /><p>No messages in this conversation.</p></div>}</div>
+          <form onSubmit={send} className="flex gap-2 border-t border-border bg-card p-4"><textarea value={input} onChange={event => setInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(event); } }} rows={1} placeholder="Reply to this patient..." className="min-h-[48px] flex-1 resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm outline-none focus:border-primary" /><button type="submit" disabled={!input.trim() || sending} className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50"><Send className="h-5 w-5" /></button></form>
+        </> : <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground"><MessageSquare className="mb-3 h-16 w-16 opacity-20" /><p>Select a patient conversation</p></div>}
+      </section>
+    </div>
+  </div>;
+}
+
 function Reports({ patients, payments, medications, orders }: { patients: AdminPatient[]; payments: AdminPayment[]; medications: AdminMedication[]; orders: AdminOrder[] }) {
   const claims = patients.flatMap(p => p.clinical.claims); const appointmentCount = patients.reduce((sum, p) => sum + p.clinical.appointments.length, 0); const sales = orders.reduce((sum, o) => sum + (o.totals?.total ?? 0), 0);
   const rows = [['Appointments', appointmentCount, 'All scheduled and historical appointments'], ['Payments collected', money(payments.filter(p => p.status === 'Paid').reduce((s, p) => s + p.amount, 0)), 'Stripe Test Mode paid transactions'], ['Pharmacy sales', money(sales), 'Patient pharmacy orders'], ['Inventory value', money(medications.reduce((s, m) => s + m.price * m.stock, 0)), 'Current catalog price × stock'], ['Insurance claims', claims.length, 'Mock claims across patients']];
@@ -612,6 +698,7 @@ export default function Admin() {
     section === 'overview' ? <Overview patients={patients} appointments={appointments} payments={payments} medications={medications} orders={orders} /> :
     section === 'patients' ? <Patients patients={patients} loading={patientsLoading} onSelect={setSelectedPatient} /> :
     section === 'appointments' ? <Appointments patients={patients} schedules={schedules} onSchedules={updateSchedules} onPatients={updatePatients} /> :
+    section === 'messages' ? <AdminMessages /> :
     section === 'payments' ? <Payments payments={payments} /> :
     section === 'medications' ? <Medications medications={medications} onMedications={updateMedications} /> :
     section === 'orders' ? <Orders orders={orders} patients={patients} onOrders={updateOrders} /> :
