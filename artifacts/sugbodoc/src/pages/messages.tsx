@@ -29,9 +29,18 @@ export default function Messages() {
   const [error, setError] = useState('');
   const endOfMessagesRef = useRef<HTMLDivElement>(null);
   const activeThread = threads.find(thread => thread.id === activeThreadId) ?? null;
+  const isPatient = session?.role === 'Patient';
+  const getThreadDisplay = (thread: ServerMessageConversation) => ({
+    name: isPatient ? 'SugboDoc Admin' : thread.patientName,
+    initials: isPatient ? 'SD' : thread.patientInitials,
+    detail: isPatient ? 'SugboDoc care team' : thread.patientEmail,
+  });
   const filteredThreads = useMemo(
-    () => threads.filter(thread => `${thread.patientName} ${thread.patientEmail} ${thread.lastMessage?.body ?? ''}`.toLowerCase().includes(search.toLowerCase())),
-    [threads, search],
+    () => threads.filter(thread => {
+      const display = getThreadDisplay(thread);
+      return `${display.name} ${display.detail} ${thread.lastMessage?.body ?? ''}`.toLowerCase().includes(search.toLowerCase());
+    }),
+    [threads, search, isPatient],
   );
 
   const refreshThreads = async (showLoading = false) => {
@@ -107,9 +116,9 @@ export default function Messages() {
             {loading ? <div className="space-y-3 p-4">{[1, 2, 3].map(item => <div key={item} className="h-16 animate-pulse rounded-xl bg-muted" />)}</div>
               : filteredThreads.map(thread => (
                 <button key={thread.id} onClick={() => setActiveThreadId(thread.id)} className={`flex w-full gap-3 border-l-2 p-4 text-left transition hover:bg-muted/50 ${activeThreadId === thread.id ? 'border-primary bg-primary/5' : 'border-transparent'}`}>
-                  <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">{thread.patientInitials}</div>
+                  <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">{getThreadDisplay(thread).initials}</div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline justify-between gap-2"><h4 className="truncate font-semibold">{thread.patientName}</h4>{thread.unreadCount > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">{thread.unreadCount}</span>}</div>
+                    <div className="flex items-baseline justify-between gap-2"><h4 className="truncate font-semibold">{getThreadDisplay(thread).name}</h4>{thread.unreadCount > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">{thread.unreadCount}</span>}</div>
                     <p className={`truncate text-sm ${thread.unreadCount ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{thread.lastMessage?.body ?? 'No messages yet — start the conversation.'}</p>
                   </div>
                 </button>
@@ -123,8 +132,8 @@ export default function Messages() {
             <div className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-card px-4">
               <div className="flex items-center gap-3">
                 <button onClick={() => setActiveThreadId(null)} className="rounded-full p-2 text-muted-foreground hover:bg-muted lg:hidden"><ChevronLeft className="h-5 w-5" /></button>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">{activeThread.patientInitials}</div>
-                <div><h3 className="text-sm font-bold">{activeThread.patientName}</h3><p className="text-xs text-primary">{activeThread.patientEmail}</p></div>
+                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-bold text-primary">{getThreadDisplay(activeThread).initials}</div>
+                 <div><h3 className="text-sm font-bold">{getThreadDisplay(activeThread).name}</h3><p className="text-xs text-primary">{getThreadDisplay(activeThread).detail}</p></div>
               </div>
               <MoreVertical className="h-5 w-5 text-muted-foreground" />
             </div>
